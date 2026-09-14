@@ -11,99 +11,102 @@ local MakeAttributesSerialize = loadstring(game:HttpGet("https://raw.githubuserc
 
 local PropList = { -- Hardcoded because Severe can only read certain arbitrary properties 
 	--[[ Classname = {
-		PropertyName = {PropertyFunction, ValueType}
+		PropertyName = {PropertyReadMode (1 = Index, 2 = PropertyFunction), ValueType, PropertyFunction (optional)}
 	} ]]
 	Instance = {
-		Name = {function(inst) return inst.Name end, "string"},
+		Name = {1, "string"},
 		Tags = {
+			2, 
+			"BinaryString",
 			function(inst)
 				local tags = inst:GetTags()
 				if #tags == 0 then
 					return ""
 				end
 				return table.concat(tags, "\0")
-			end, 
-			"BinaryString"
+			end,
 		},
-		AttributesSerialize = {MakeAttributesSerialize, "BinaryString"}
+		AttributesSerialize = {2, "BinaryString", MakeAttributesSerialize}
 	},
 	BillboardGui = {
-		Adornee = {function(inst) return inst.Adornee end, "ref"}
+		Adornee = {1, "ref"}
 	},
 	Workspace = {
-		CurrentCamera = {function(inst) return inst.CurrentCamera end, "ref"}
+		CurrentCamera = {1, "ref"}
 	},
 	Players = {
-		LocalPlayer = {function(inst) return inst.LocalPlayer end, "ref"}
+		LocalPlayer = {1, "ref"}
 	},
 	Camera = {
-		ViewportSize = {function(inst) return inst.ViewportSize end, "Vector2"},
-		FieldOfView = {function(inst) return inst.FieldOfView end, "float"},
-		CFrame = {function(inst) return inst.CFrame end, "CoordinateFrame"}
+		ViewportSize = {1, "Vector2"},
+		FieldOfView = {1, "float"},
+		CFrame = {1, "CoordinateFrame"}
 	},
 	BasePart = {
-		Size = {function(inst) return inst.Size end, "Vector3"},
-		CFrame = {function(inst) return inst.CFrame end, "CoordinateFrame"},
-		CanCollide = {function(inst) return inst.CanCollide end, "bool"},
-		Transparency = {function(inst) return inst.Transparency end, "float"},
-		IsNetworkSleeping = {function(inst) return inst.IsNetworkSleeping end, "bool"},
-		Velocity = {function(inst) return inst.Velocity end, "Vector3"},
+		Size = {1, "Vector3"},
+		CFrame = {1, "CoordinateFrame"},
+		CanCollide = {1, "bool"},
+		Transparency = {1, "float"},
+		IsNetworkSleeping = {1, "bool"},
+		Velocity = {1, "Vector3"},
 		Shape = {
+			2,
+			"token",
 			function(inst) 
 				if inst.Description then 
 					return inst.Description.Shape 
 				end
-			end,
-			"token"
+			end
 		},
 		Color = {
+			2,
+			"Color3",
 			function(inst) 
 				if inst.Description then 
 					return inst.Description.Color3 
 				end
 			end,
-			"Color3"
 		}
 	},
 	MeshPart = {
-		MeshId = {function(inst) return inst.MeshId end, "ContentId"},
-		Size = {function(inst) return inst.TextureId end, "ContentId"}
+		MeshId = {1, "ContentId"},
+		TextureId = {1, "ContentId"}
 	},
 	Player = {
-		Team = {function(inst) return inst.Team end, "ref"},
-		UserId = {function(inst) return inst.UserId end, "int64"},
-		Character = {function(inst) return inst.Character end, "ref"},
-		DisplayName = {function(inst) return inst.DisplayName end, "string"},
+		Team = {1, "ref"},
+		UserId = {1, "int64"},
+		Character = {1, "ref"},
+		DisplayName = {1, "string"},
 	},
 	Model = {
-		PrimaryPart = {function(inst) return inst.PrimaryPart end, "ref"}
+		PrimaryPart = {1, "ref"}
 	},
 	Humanoid = {
-		MaxHealth = {function(inst) return inst.MaxHealth end, "float"},
-		Health = {function(inst) return inst.Health end, "float"}
+		MaxHealth = {1, "float"},
+		Health = {1, "float"}
 	},
 	UserInputService = {
-		MouseBehavior = {function(inst) return game:GetService("UserInputService").MouseBehavior end, "token"},
-		MouseDeltaSensitivity = {function(inst) return game:GetService("UserInputService").MouseDeltaSensitivity end, "float"},
-		MouseIconEnabled = {function(inst) return game:GetService("UserInputService").MouseIconEnabled end, "bool"}
+		MouseBehavior = {1, "token"},
+		MouseDeltaSensitivity = {1, "float"},
+		MouseIconEnabled = {1, "bool"}
 	},
 	BoolValue = {
-		Value = {function(inst) return inst.Value end, "bool"}
+		Value = {1, "bool"}
 	},
 	IntValue = {
-		Value = {function(inst) return inst.Value end, "int64"}
+		Value = {1, "int64"}
 	},
 	NumberValue = {
-		Value = {function(inst) return inst.Value end, "double"}
+		Value = {1, "double"}
 	},
 	ObjectValue = {
-		Value = {function(inst) return inst.Value end, "ref"}
+		Value = {1, "ref"}
 	},
 	StringValue = {
-		Value = {function(inst) return inst.Value end, "string"} -- Empty strings return an instance for some reason?
+		Value = {1, "string"}
 	},
 	Vector3Value = {
-		Value = {function(inst) return inst.Value end, "Vector3"}
+		Value = {1, "Vector3"}
 	}
 	-- .Value on the other ValueBase subclasses cannot be read by Severe
 
@@ -171,7 +174,7 @@ Descriptors = {
 		return raw and "true" or "false"
 	end,
 	BinaryString = function(raw)
-		return Base64Encode(raw)
+		return raw == "" and "" or Base64Encode(raw)
 	end,
 	Color3 = function(raw)
 		return "<R>" .. raw.X/255 .. "</R><G>" .. raw.Y/255 .. "</G><B>" .. raw.Z/255 .. "</B>"
@@ -217,37 +220,65 @@ local SuperclassesOfClass = { -- Hardcoded because of Severe's inconsistencies
 print("SaveInstance initialized")
 
 local function saveinstance(Options)
+	-- Options: ToSave (Instance or table), IsModel (bool), PrintInterval (int), FileName (string), DebugPrints (bool)
+	
 	if not Options then
 		Options = {}
 	end
-	if not Options.ToSave then 
-		Options.ToSave = game
+	local IsModel = Options.IsModel
+	if not IsModel then
+		IsModel = true
 	end
-	if not Options.PrintInterval then 
-		Options.PrintInterval = 1000
+	local ToSave = Options.ToSave
+	if not ToSave then 
+		ToSave = {
+			game:GetService("Workspace"),
+			game:GetService("Players"),
+			game:GetService("Lighting"),
+			game:GetService("MaterialService"),
+			game:GetService("ReplicatedFirst"),
+			game:GetService("ReplicatedStorage"),
+			game:GetService("StarterGui"),
+			game:GetService("StarterPack"),
+			game:GetService("StarterPlayer"),
+			game:GetService("Teams"),
+			game:GetService("SoundService")
+		}
+		if IsModel == nil then
+			IsModel = false
+		end
 	end
-	if not Options.FileName then 
-		Options.FileName = tostring(game.PlaceId)
+	local PrintInterval = Options.PrintInterval
+	if not PrintInterval then 
+		PrintInterval = 1000
 	end
+	local FileName = Options.FileName
+	if not FileName then 
+		FileName = tostring(game.PlaceId)
+	end
+	
+	if ToSave == game then
+		ToSave = game:GetChildren()
+		if IsModel == nil then
+			IsModel = false
+		end
+	end	
 	
 	local StartingTime = os.clock()
 	local SavedInstancesCount = 0
 	local SavedInstancesUntilPrint = 0
-	local PrintInterval = Options.PrintInterval
 	local FileType
-	local ToSave = Options.ToSave
-	if ToSave == game then
-		FileType = "rbxlx"
-	else
+	
+	if Options.IsModel then
 		FileType = "rbxmx"
+	else
+		FileType = "rbxlx"
 	end
-	if ToSave == game then
-		ToSave = game:GetChildren()
-	end	
+	
 	if typeof(ToSave) == "Instance" then
 		ToSave = {ToSave}
 	end
-	local FileName = Options.FileName
+	
 	local DebugPrints = Options.DebugPrints
 	local FullFileName = FileName .. "." .. FileType .. ".txt" -- Severe only lets you write certain files extensions, rbxlx/rbxmx files aren't part of that list
 	local SerializedData = '<roblox version="4">' -- XML header
@@ -277,8 +308,16 @@ local function saveinstance(Options)
 					continue
 				end
 				for PropertyName, PropertyData in Properties do
-					local raw = PropertyData[1](Instance)
+					local PropertyMode = PropertyData[1]
 					local ValueType = PropertyData[2]
+					local raw
+					
+					if PropertyMode == 1 then -- Index
+						raw = Instance[PropertyName]
+					elseif PropertyMode == 2 then -- PropertyFunction
+						raw = PropertyData[3](Instance)
+					end
+					
 					local TypeOfResult = typeof(raw)
 					if raw == nil then
 						continue
