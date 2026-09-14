@@ -171,7 +171,7 @@ Descriptors = {
 		return raw and "true" or "false"
 	end,
 	BinaryString = function(raw)
-		return buffer.tostring(Base64Encode(buffer.fromstring(raw)))
+		return Base64Encode(raw)
 	end,
 	Color3 = function(raw)
 		return "<R>" .. raw.X/255 .. "</R><G>" .. raw.Y/255 .. "</G><B>" .. raw.Z/255 .. "</B>"
