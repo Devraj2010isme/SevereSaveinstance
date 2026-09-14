@@ -6,8 +6,7 @@
 -- Mostly made as a challege for me to make a saveinstance without stealing code from UniversalSynSaveinstance
 -- Current things from UniversalSynSaveinstance I have used: AttributesSerialize generator, escapes stuff
 
-local JsonDecode = loadstring(game:HttpGet("https://raw.githubusercontent.com/rxi/json.lua/refs/heads/master/json.lua", true))().decode
-local Base64Encode = loadstring(game:HttpGet("https://raw.githubusercontent.com/Reselim/Base64/master/Base64.lua", true))().encode
+local Base64Encode = crypt.base64.encode
 local MakeAttributesSerialize = loadstring(game:HttpGet("https://raw.githubusercontent.com/Devraj2010isme/SevereSaveinstance/refs/heads/main/MakeAttributesSerialize.luau", true))()
 
 local PropList = { -- Hardcoded because Severe can only read certain arbitrary properties 
