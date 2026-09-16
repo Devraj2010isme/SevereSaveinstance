@@ -161,8 +161,8 @@ Descriptors = {
 	end,
 	token = function(raw) return raw end, -- Severe returns the enum value by default
 	ref = function(raw) -- Class category
-		local CanRead, _ = pcall(function() return raw.ClassName end)
-		if CanRead then -- CanRead usually fails when the class category property is nil (Severe returns an empty intance), but I've seen random failures in other cases
+		local CanRead, ClassName = pcall(function() return raw.ClassName end)
+		if CanRead and ClassName ~= "" then -- CanRead usually fails when the class category property is nil (Severe returns an empty intance), but I've seen random failures in other cases
 			return raw.Data
 		end
 		return "null"
@@ -283,19 +283,21 @@ local function saveinstance(Options)
 	local FullFileName = FileName .. "." .. FileType .. ".txt" -- Severe only lets you write certain files extensions, rbxlx/rbxmx files aren't part of that list
 	local SerializedData = '<roblox version="4">' -- XML header
 	local CurrentSerializedData = ""
+	local InstanceData = ""
 	
 	local function SerializeInstances(Instances)
 		for _, Instance in Instances do
-			local CanRead, _ = pcall(function() return Instance.ClassName end)
-			if not CanRead then
-				if DebugPrints then
-					warn("Broken instance found, skipping")
-				end
-				continue
-			end
+			--local CanRead, _ = pcall(function() return Instance.ClassName end)
+			--if not CanRead then
+			--	if DebugPrints then
+			--		warn("Broken instance found, skipping")
+			--	end
+			--	continue
+			--end
+			
 			local ClassName = Instance.ClassName
 			local Referent = Instance.Data
-			CurrentSerializedData ..= '<Item class="' .. ClassName .. '" referent="' .. Referent .. '"><Properties>'
+			InstanceData ..= '<Item class="' .. ClassName .. '" referent="' .. Referent .. '"><Properties>'
 			
 			local Superclasses = SuperclassesOfClass[ClassName]
 			if not Superclasses then
@@ -328,7 +330,7 @@ local function saveinstance(Options)
 						local Descriptor = Descriptors[ValueType]
 						if Descriptor then
 							Formatted = Descriptor(raw)
-							CurrentSerializedData ..= "<" .. ValueType ..' name="' .. PropertyName .. '">' .. Formatted .. "</" .. ValueType .. ">"
+							InstanceData ..= "<" .. ValueType ..' name="' .. PropertyName .. '">' .. Formatted .. "</" .. ValueType .. ">"
 						elseif DebugPrints then
 							warn("No descriptor for type " .. ValueType)
 						end
@@ -338,7 +340,9 @@ local function saveinstance(Options)
 				end
 			end
 			
-			CurrentSerializedData ..= "</Properties>"
+			InstanceData ..= "</Properties>"
+			CurrentSerializedData ..= InstanceData
+			InstanceData = ""
 			SavedInstancesCount += 1
 			SavedInstancesUntilPrint += 1
 			if SavedInstancesUntilPrint == PrintInterval then
