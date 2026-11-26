@@ -1331,8 +1331,8 @@ local function saveinstance(CustomOptions)
 	-- Options: IsModel (bool), ToSave (Pointer, Instance, or table of pointers/instances), PrintInterval (int), FileName (string), DebugPrints (bool), Decompile (bool), SaveBytecode (bool), DecompileFunction (function)
 	
 	local Options = {
-		IsModel = nil, -- Whether the file is saved as a model (RBXM) file instead of a place style (bool)
-		ToSave = { -- These instances and their descendants are saved (pointer, instance, or a table of pointers/instances)
+		IsModel = nil,
+		ToSave = {
 			GetService("Workspace"),
 			GetService("Players"),
 			GetService("Lighting"),
@@ -1346,16 +1346,17 @@ local function saveinstance(CustomOptions)
 			GetService("SoundService"),
 			GetService("JointsService")
 		},
-		PrintInterval = 1000, -- Amount of instances between prints (int)
-		FileName = memory.readu64(DataModel, Offsets.DataModel.PlaceId), -- File name without extension (string)
-		DebugPrints = true, -- Debug prints about unusual scenarios (bool)
-		Decompile = false, -- Whether to decompile local and module scripts (bool)
-		SaveBytecode = false, -- Whether to include the base64-encoded bytecode of local and module scripts
-		DecompileFunction = function(Bytecode) -- Function used when decompiling scripts
+		PrintInterval = 1000,
+		FileName = memory.readu64(DataModel, Offsets.DataModel.PlaceId),
+		DebugPrints = false,
+		Decompile = true,
+		SaveBytecode = false,
+		DecompileFunction = function(Bytecode)
 			local Body = crypt.json.encode({script = crypt.base64.encode(Bytecode)})
 			return game:HttpPost("https://api.lua.expert/decompile", Body, "application/json", "application/json")
 		end,
-		NotCreatableFixes = {Player = "Folder", PlayerGui = "Folder", PlayerScripts = "Folder", TouchTransmitter = "Folder"} -- Saves instances as different classes so they can appear in studio (table)
+		NotCreatableFixes = {Player = "Folder", PlayerGui = "Folder", PlayerScripts = "Folder", TouchTransmitter = "Folder"},
+		ReadMe = true
 	}
 	
 	if CustomOptions then
@@ -1518,7 +1519,9 @@ local function saveinstance(CustomOptions)
 	
 	SerializeInstances(ToSave)
 	SerializedData ..= CurrentSerializedData
-	SerializedData ..= '<Item class="Script" referent="1"><Properties><string name="Name">README</string><ProtectedString name="Source">--[[\nSaved using: https://github.com/Devraj2010isme/SevereSaveinstance\nGameId: ' .. memory.readu64(DataModel, Offsets.DataModel.GameId) .. "\nPlaceId: " .. memory.readu64(DataModel, Offsets.DataModel.PlaceId) .. "\nPlaceVersion: " .. memory.readu32(DataModel, Offsets.DataModel.PlaceVersion) .. "\nOptions used when saving: " .. crypt.json.encode(Options) .. "\n]]</ProtectedString></Properties></Item>"
+	if Options.ReadMe then
+		SerializedData ..= '<Item class="Script" referent="1"><Properties><string name="Name">README</string><ProtectedString name="Source">--[[\nSaved using: https://github.com/Devraj2010isme/SevereSaveinstance\nGameId: ' .. memory.readu64(DataModel, Offsets.DataModel.GameId) .. "\nPlaceId: " .. memory.readu64(DataModel, Offsets.DataModel.PlaceId) .. "\nPlaceVersion: " .. memory.readu32(DataModel, Offsets.DataModel.PlaceVersion) .. "\nOptions used when saving: " .. crypt.json.encode(Options) .. "\n]]</ProtectedString></Properties></Item>"
+	end
 	SerializedData ..= "</roblox>"
 	
 	print("Writing to file...")
