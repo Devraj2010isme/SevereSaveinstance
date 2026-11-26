@@ -2,27 +2,124 @@
 --!optimize 2
 
 -- Saveinstance for Severe External
--- Can only save a few properties that can be accessed by the external without memory functions
--- Mostly made as a challege for me to make a saveinstance without stealing code from UniversalSynSaveinstance
--- Current things from UniversalSynSaveinstance I have used: AttributesSerialize generator, escapes stuff, Color3uint8 descriptor
 
 local Base64Encode = crypt.base64.encode
 local JSONDecode = crypt.json.decode
-local MakeAttributesSerialize = loadstring(game:HttpGet("https://raw.githubusercontent.com/Devraj2010isme/SevereSaveinstance/refs/heads/main/MakeAttributesSerialize.luau", true))()
-local Offsets = JSONDecode(readfile("Offsets.json"))
 local Version = game:GetClientVersion()
+local Offsets = JSONDecode(game:HttpGet("https://raw.githubusercontent.com/Devraj2010isme/SevereSaveinstance/refs/heads/main/Offsets/" .. Version .. ".json"))
+if not Offsets then -- JSONDecode returns nil for invalid JSON
+	warn("Failed to get offets for version " .. Version)
+	return
+end
+local ZSTDDecompress = loadstring(game:HttpGet("https://raw.githubusercontent.com/kingdudely/roblox-ts-scripts/refs/heads/main/fzstd/index.luau"))().decompress
+
+local DataModel
+do -- DataModel
+	local VisualEngine = memory.readu64(memory.base, Offsets.VisualEngine.Pointer)
+	local FakeDataModel = memory.readu64(VisualEngine, Offsets.VisualEngine.FakeDataModel)
+	local RealDataModel = memory.readu64(FakeDataModel, Offsets.FakeDataModel.RealDataModel)
+	if not RealDataModel or RealDataModel == 0 then
+		error("Failed to find the datamodel")
+	end
+	DataModel = RealDataModel
+end
+
+local ChildrenStartOffset = Offsets.Instance.ChildrenStart
+local ClassDescriptorOffset = Offsets.Instance.ClassDescriptor
+local ParentOffset = Offsets.Instance.Parent
+local NameContainerOffset = Offsets.Instance.NameContainer
+
+local function GetChildren(Instance) -- Because Severe's GetChildren is slow
+	local ChildrenListPointer = memory.readu64(Instance, ChildrenStartOffset)
+	
+	if ChildrenListPointer ~= 0 then
+		local CurrentChildPointer = memory.readu64(ChildrenListPointer)
+		local ChildrenEndPointer = memory.readu64(ChildrenListPointer, 8)
+		
+		local Children = {}
+		
+		repeat
+			table.insert(Children, memory.readu64(CurrentChildPointer))
+			CurrentChildPointer += 16
+		until CurrentChildPointer >= ChildrenEndPointer
+		
+		return Children
+	end
+end
+
+local function ReadString(Data, Offset, IncludeNullStrings) -- Because memory.readstring cuts off after 512 characters
+	local Pointer = memory.readu64(Data, Offset)
+	local Length = memory.readu64(Data, Offset + 16)
+	
+	if Pointer == 0 or Length == 0 or Length >= 200000 then
+		return ""
+	end
+	
+	local StringData
+	local StringData2
+	
+	local Success = pcall(function()
+		StringData = buffer.tostring(memory.readbuffer(Pointer, Length))
+	end)
+	
+	if Length <= 15 and not Success then
+		StringData2 = buffer.tostring(memory.readbuffer(Data + Offset, Length))
+		if IncludeNullStrings or not string.find(StringData2, "\0", 1, true) then
+			return StringData2
+		end
+	end
+	
+	if not Success or (not IncludeNullStrings and string.find(StringData, "\0", 1, true)) then
+		return ""
+	end
+	
+	return StringData
+end
+
+local function GetClassName(Instance)
+	local ClassDescriptor = memory.readu64(Instance, ClassDescriptorOffset)
+	local ClassNameHolder = memory.readu64(ClassDescriptor, 8)
+	
+	if ClassNameHolder == 0 then
+		return "Instance"
+	end
+	
+	return ReadString(ClassNameHolder, 0)
+end
+
+local function GetName(Instance)
+	local NameHolder = memory.readu64(Instance, NameContainerOffset)
+	return ReadString(NameHolder, 0)
+end
+
+local function GetParent(Instance)
+	return memory.readu64(Instance, ParentOffset)
+end
+
+local function GetService(ServiceName)
+	local Children = GetChildren(game)
+	for _, Child in Children do
+		if GetClassName(Child) == ServiceName then
+			return Child
+		end
+	end
+	return 0
+end
+
+local FontFamilyOffset = Offsets.Font.Family
+local FontWeightOffset = Offsets.Font.Weight
+local FontStyleOffset = Offsets.Font.Style
+local FontCachedFaceIdOffset = Offsets.Font.CachedFaceId
 
 local MemoryReadFunctions = {
 	bool = memory.readbool,
 	float = memory.readf32,
+	double = memory.readf64,
 	Color3 = memory.readvector,
-	--Instance = function(Data, Offset)
-	--	local Pointer = memory.readu64(Data, Offset)
-	--	return Pointer ~= 0 and pointer_to_userdata(Pointer) or nil 
-	--end,
+	ref = memory.readu64,
 	token = memory.readi32,
 	BrickColor = memory.readi32,
-	int = memory.readu32,
+	int = memory.readi32,
 	int64 = memory.readu64,
 	Vector3 = memory.readvector,
 	Vector2 = memory.readvector,
@@ -41,39 +138,112 @@ local MemoryReadFunctions = {
 		Color.B = memory.readu8(Data, Offset + 2)
 		return Color
 	end,
-	string = memory.readstring,
-	ContentId = memory.readstring
+	string = ReadString,
+	ContentId = ReadString,
+	Content = ReadString,
+	BinaryString = function(Data, Offset)
+		return ReadString(Data, Offset, true)
+	end,
+	NumberRange = function(Data, Offset)
+		return {memory.readf32(Data, Offset), memory.readf32(Data, Offset + 4)}
+	end,
+	UDim2 = function(Data, Offset)
+		local UDim2 = {}
+		UDim2.XS = memory.readf32(Data, Offset)
+		UDim2.XO = memory.readi32(Data, Offset + 4)
+		UDim2.YS = memory.readf32(Data, Offset + 8)
+		UDim2.YO = memory.readi32(Data, Offset + 12)
+		return UDim2
+	end,
+	Ray = function(Data, Offset)
+		local Ray = {}
+		Ray.Origin = memory.readvector(Data, Offset)
+		Ray.Direction = memory.readvector(Data, Offset + 12)
+		return Ray
+	end,
+	Font = function(Data, Offset)
+		local Font = {}
+		local FontHolder = memory.readu64(Data, Offset)
+		Font.Family = ReadString(FontHolder, FontFamilyOffset)
+		Font.Weight = memory.readi32(FontHolder, FontWeightOffset)
+		Font.Style = memory.readbool(FontHolder, FontStyleOffset)
+		Font.CachedFaceId = ReadString(FontHolder, FontCachedFaceIdOffset)
+		return Font
+	end,
+	Rect2D = function(Data, Offset)
+		local Rect = {}
+		Rect.MinX = memory.readf32(Data, Offset)
+		Rect.MinY = memory.readf32(Data, Offset + 4) 
+		Rect.MaxX = memory.readf32(Data, Offset + 8) 
+		Rect.MaxY = memory.readf32(Data, Offset + 12)
+		return Rect
+	end
 }
 
--- TODO: BasePart PrimitiveFlags, Workspace World/AirProperties
+local PrimitiveOffset = Offsets.BasePart.Primitive
+local PrimitiveFlagsOffset = Offsets.Primitive.Flags
+local MaterialOffset = Offsets.Primitive.Material
+local RootPriorityOffset = Offsets.Primitive.RootPriority
+local RunContextOffset = Offsets.BaseScript.RunContext
+
+local function ReadPrimitiveFlag(inst, PropertyName)
+	local Prim = memory.readu64(inst, PrimitiveOffset)
+	return bit32.band(memory.readu8(Prim, PrimitiveFlagsOffset), Offsets.PrimitiveFlags[PropertyName]) ~= 0
+end
+
+local function ContentIdToU64(inst, PropertyName, Class)
+	local Offset = Offsets[Class][PropertyName]
+	local raw = ReadString(inst, Offset)
+	
+	if not string.find(raw, "rbxassetid", 1, true) then
+		return 0
+	end
+	
+	return tonumber(string.sub(raw, 14))
+end
+
+local function Color3uint8ToColor3(inst, PropertyName, Class)
+	local Offset = Offsets[Class][PropertyName]
+	local Color = {}
+	Color.X = memory.readu8(inst, Offset) / 255
+	Color.Y = memory.readu8(inst, Offset + 1) / 255
+	Color.Z = memory.readu8(inst, Offset + 2) / 255
+	return Color
+end
+
+local function RadiansToDegrees(inst, PropertyName, Class)
+	local Offset = Offsets[Class][PropertyName]
+	return memory.readf32(inst, Offset) * 180/math.pi
+end
+
 local PropList = { -- Hardcoded because Severe can only read certain arbitrary properties 
 	--[[ Classname = {
-		PropertyName: {PropertyReadMode: 1 = Index, 2 = PropertyFunction, 3 = Memory)
+		PropertyName: {PropertyReadMode: 1 = Memory, 2 = PropertyFunction, 3 = Decompile}
 		ValueType: String
-		PropertyFunction: Function (mode 2), PropertyNameOverride: String (mode 3, only used when dumping offsets)
-		ClassNameOverride: String (mode 3, only used when dumping offsets)
-		Namespace: String (mode 3, reads properties from a different namespace such as Primitive)
+		PropertyFunction: Function (mode 2), PropertyNameOverride: String (mode 1, only used when dumping offsets)
+		ClassNameOverride: String (mode 1, only used when dumping offsets)
+		Namespace: String (mode 1, reads properties from a different namespace such as Primitive)
 		}
 	} ]]
 	Instance = {
-		Name = {1, "string"},
 		Tags = {
-			2, 
-			"BinaryString",
+			2, "BinaryString",
 			function(inst)
-				local tags = inst:GetTags()
+				local InstanceUserdata = pointer_to_userdata(inst)
+				local tags = InstanceUserdata:GetTags()
 				if #tags == 0 then
 					return ""
 				end
 				return table.concat(tags, "\0")
-			end,
+			end
 		},
 		AttributesSerialize = {
-			2,
-			"BinaryString",
+			2, "BinaryString",
 			function(inst) -- All Severe Attributes are string type
-				local Attributes = inst:GetAttributes()
-				if not next(Attributes) then
+				local InstanceUserdata = pointer_to_userdata(inst)
+				local Success, Attributes = pcall(function() return InstanceUserdata:GetAttributes() end) -- GetAttributes sometimes fails with the message "invalid string position"
+				
+				if not Success or not next(Attributes) then
 					return ""
 				end
 				
@@ -104,166 +274,229 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 				
 				return buffer.tostring(b)
 			end
-		}
-	},
-	BillboardGui = {
-		Adornee = {1, "ref"}
+		},
+		Name = {1, "string", nil, nil, "NameContainer"}
 	},
 	Workspace = {
-		CurrentCamera = {1, "ref"}
-	},
-	Players = {
-		LocalPlayer = {1, "ref"}
+		CurrentCamera = {1, "ref"},
+		Gravity = {1, "float", "ReadOnlyGravity"},
+		FallenPartsDestroyHeight = {1, "float", nil, nil, "World"},
+		AirDensity = {
+			2, "float",
+			function(inst)
+				local World = memory.readu64(inst, Offsets.Workspace.World)
+				local AirProperties = memory.readu64(World, Offsets.World.AirProperties)
+				return memory.readf32(AirProperties, Offsets.AirProperties.AirDensity)
+			end
+		},
+		GlobalWind = {
+			2, "Vector3",
+			function(inst)
+				local World = memory.readu64(inst, Offsets.Workspace.World)
+				local AirProperties = memory.readu64(World, Offsets.World.AirProperties)
+				return memory.readvector(AirProperties, Offsets.AirProperties.GlobalWind)
+			end
+		}
 	},
 	Camera = {
-		ViewportSize = {3, "Vector2"},
-		CFrame = {3, "CoordinateFrame", "Rotation"},
-		--CameraSubject = {3, "ref"},
-		CameraType = {3, "token"}
+		CFrame = {1, "CoordinateFrame", "Rotation"},
+		CameraSubject = {1, "ref"},
+		CameraType = {1, "token"},
+		FieldOfView = {2, "float", RadiansToDegrees},
+		FieldOfViewMode = {1, "token"},
+		Focus = {1, "CoordinateFrame"},
+		HeadLocked = {1, "bool"},
+		HeadScale = {1, "float"},
+		OrthographicSize = {1, "float"},
+		VRTiltAndRollEnabled = {1, "bool"}
+		-- TODO OrthographicMode, ProjectionType, ViewStretch
 	},
 	CharacterMesh = {
-		BaseTextureId = {3, "int64"},
-		BodyPart = {3, "token"},
-		MeshId = {3, "int64"},
-		OverlayTextureId = {3, "int64"}
+		BaseTextureId = {2, "int64", ContentIdToU64},
+		BodyPart = {1, "token"},
+		MeshId = {2, "int64", ContentIdToU64},
+		OverlayTextureId = {2, "int64", ContentIdToU64}
 	},
 	Highlight = {
-		--Adornee = {3, "ref"},
-		DepthMode = {3, "token"},
-		Enabled = {3, "bool"},
-		FillColor = {3, "Color3"},
-		FillTransparency = {3, "float"},
-		OutlineColor = {3, "Color3"},
-		OutlineTransparency = {3, "float"}
+		Adornee = {1, "ref"},
+		DepthMode = {1, "token"},
+		Enabled = {1, "bool"},
+		FillColor = {1, "Color3"},
+		FillTransparency = {1, "float"},
+		OutlineColor = {1, "Color3"},
+		OutlineTransparency = {1, "float"}
 	},
 	HopperBin = {
-		BinType = {3, "token"}
+		BinType = {1, "token"},
+		Active = {1, "bool"}
 	},
-	--Seat = {
-	--	Occupant = {3, "ref"}
-	--},
+	Seat = {
+		Occupant = {1, "ref"},
+		Disabled = {1, "bool"}
+	},
 	Lighting = {
-		Ambient = {3, "Color3"},
-		Brightness = {3, "float"},
-		ClockTime = {3, "float"},
-		ColorShift_Top = {3, "Color3"},
-		ColorShift_Bottom = {3, "Color3"},
-		EnvironmentDiffuseScale = {3, "float"},
-		EnvironmentSpecularScale = {3, "float"},
-		ExposureCompensation = {3, "float"},
-		FogColor  = {3, "Color3"},
-		FogEnd = {3, "float"},
-		FogStart = {3, "float"},
-		OutdoorAmbient = {3, "Color3"},
-		ShadowSoftness = {3, "float"},
-		GeographicLatitude = {3, "float"},
-		GlobalShadows = {3, "bool"},
+		Ambient = {1, "Color3"},
+		Brightness = {1, "float"},
+		ColorShift_Top = {1, "Color3"},
+		ColorShift_Bottom = {1, "Color3"},
+		EnvironmentDiffuseScale = {1, "float"},
+		EnvironmentSpecularScale = {1, "float"},
+		ExposureCompensation = {1, "float"},
+		FogColor  = {1, "Color3"},
+		FogEnd = {1, "float"},
+		FogStart = {1, "float"},
+		OutdoorAmbient = {1, "Color3"},
+		ShadowSoftness = {1, "float"},
+		GeographicLatitude = {1, "float"},
+		GlobalShadows = {1, "bool"},
+		ClockTime = {
+			2, "float",
+			function(inst)
+				return memory.readu64(inst, Offsets.Lighting.ClockTime) / 3.6e+9 -- ClockTime is stored as microseconds in memory
+			end
+		}
 	},
 	Sky = {
-		SkyboxBk = {3, "ContentId"},
-		SkyboxDn = {3, "ContentId"},
-		SkyboxFt = {3, "ContentId"},
-		SkyboxLf = {3, "ContentId"},
-		SkyboxRt = {3, "ContentId"},
-		SkyboxUp = {3, "ContentId"},
-		SunAngularSize = {3, "float"},
-		MoonAngularSize = {3, "float"},
-		SunTextureId = {3, "ContentId"},
-		MoonTextureId = {3, "ContentId"},
-		SkyboxOrientation = {3, "Vector3"},
-		StarCount = {3, "int"}
+		SkyboxBk = {1, "ContentId"},
+		SkyboxDn = {1, "ContentId"},
+		SkyboxFt = {1, "ContentId"},
+		SkyboxLf = {1, "ContentId"},
+		SkyboxRt = {1, "ContentId"},
+		SkyboxUp = {1, "ContentId"},
+		SunAngularSize = {1, "float"},
+		MoonAngularSize = {1, "float"},
+		SunTextureId = {1, "ContentId"},
+		MoonTextureId = {1, "ContentId"},
+		SkyboxOrientation = {1, "Vector3"},
+		StarCount = {1, "int"},
+		CelestialBodiesShown = {1, "bool"}
+	},
+	DataModelMesh = {
+		Scale = {1, "Vector3"},
+		Offset = {1, "Vector3"},
+		VertexColor = {1, "Vector3"}
+	},
+	FileMesh = {
+		MeshId = {1, "ContentId"},
+		TextureId = {1, "ContentId"}
 	},
 	SpecialMesh = {
-		MeshId = {3, "ContentId"},
-		TextureId = {3, "ContentId"},
-		Scale = {3, "Vector3"},
-		Offset = {3, "Vector3"}
+		MeshType = {1, "token"}
+	},
+	BevelMesh = {
+		Bevel = {1, "float"},
+		["Bevel Roundness"] = {1, "float"},
+		Bulge = {1, "float"}
 	},
 	Team = {
-		TeamColor = {3, "BrickColor", "BrickColor"}
+		TeamColor = {1, "BrickColor", "BrickColor"}
 	},
 	Terrain = {
-		GrassLength = {3, "float"},
-		WaterColor = {3, "Color3"},
-		WaterReflectance = {3, "float"},
-		WaterTransparency = {3, "float"},
-		WaterWaveSize = {3, "float"},
-		WaterWaveSpeed = {3, "float"},
-		-- TODO MaterialColors
+		GrassLength = {1, "float"},
+		WaterColor = {1, "Color3"},
+		WaterReflectance = {1, "float"},
+		WaterTransparency = {1, "float"},
+		WaterWaveSize = {1, "float"},
+		WaterWaveSpeed = {1, "float"},
+		MaterialColors = {
+			2, "BinaryString",
+			function(inst)
+				local MaterialColorsPointer = memory.readu64(inst, Offsets.Terrain.MaterialColors)
+				return buffer.tostring(memory.readbuffer(MaterialColorsPointer, 69))
+			end
+		}
+	},
+	BackpackItem = {
+		TextureId = {1, "ContentId", nil, "Tool"},
 	},
 	Tool = {
-		Tooltip = {3, "string"},
-		TextureId = {3, "ContentId"},
-		Enabled = {3, "bool"},
-		CanBeDropped = {3, "bool"},
-		RequiresHandle = {3, "bool"},
-		Grip = {3, "CoordinateFrame"}
+		Tooltip = {1, "string"},
+		Enabled = {1, "bool"},
+		CanBeDropped = {1, "bool"},
+		ManualActivationOnly = {1, "bool"},
+		RequiresHandle = {1, "bool"},
+		Grip = {1, "CoordinateFrame"}
+	},
+	Flag = {
+		TeamColor = {1, "BrickColor"}
 	},
 	VehicleSeat = {
-		MaxSpeed = {3, "float"},
-		SteerFloat = {3, "float"},
-		ThrottleFloat = {3, "float"},
-		Torque = {3, "float"},
-		TurnSpeed = {3, "float"},
-		-- Occupant = {3, "ref"}
+		MaxSpeed = {1, "float"},
+		SteerFloat = {1, "float"},
+		ThrottleFloat = {1, "float"},
+		Torque = {1, "float"},
+		TurnSpeed = {1, "float"},
+		Occupant = {1, "ref"}
 	},
 	SurfaceAppearance = {
-		AlphaMode = {3, "token"},
-		Color = {3, "Color3"},
-		ColorMap = {3, "ContentId"},
-		EmissiveStrength = {3, "float"},
-		EmissiveTint = {3, "Color3"},
-		MetalnessMap = {3, "ContentId"},
-		NormalMap = {3, "ContentId"},
-		RoughnessMap = {3, "ContentId"}
-		-- TODO EmissiveMaskContent
+		AlphaMode = {1, "token"},
+		Color = {1, "Color3"},
+		ColorMap = {1, "ContentId"},
+		EmissiveStrength = {1, "float"},
+		EmissiveTint = {1, "Color3"},
+		MetalnessMap = {1, "ContentId"},
+		NormalMap = {1, "ContentId"},
+		RoughnessMap = {1, "ContentId"},
+		EmissiveMaskContent = {1, "Content"}
 	},
 	ParticleEmitter = {
-		Brightness = {3, "float"},
-		LightEmission = {3, "float"},
-		LightInfluence = {3, "float"},
-		Texture = {3, "ContentId"},
-		ZOffset = {3, "float"},
-		Rate = {3, "float"},
-		SpreadAngle = {3, "Vector2"},
-		Acceleration = {3, "Vector3"},
-		Drag = {3, "float"},
-		TimeScale = {3, "float"},
-		VelocityInheritance = {3, "float"}
-		-- TODO Lifetime, Rotation, RotSpeed, Speed (NumberRange)
+		Brightness = {1, "float"},
+		LightEmission = {1, "float"},
+		LightInfluence = {1, "float"},
+		Texture = {1, "ContentId"},
+		ZOffset = {1, "float"},
+		Rate = {1, "float"},
+		SpreadAngle = {1, "Vector2"},
+		Acceleration = {1, "Vector3"},
+		Drag = {1, "float"},
+		TimeScale = {1, "float"},
+		VelocityInheritance = {1, "float"},
+		Lifetime = {1, "NumberRange"},
+		Rotation = {1, "NumberRange"},
+		RotSpeed = {1, "NumberRange"},
+		Speed = {1, "NumberRange"}
 	},
 	Beam = {
-		Brightness = {3, "float"},
-		LightEmission = {3, "float"},
-		LightInfluence = {3, "float"},
-		Texture = {3, "ContentId"},
-		TextureLength = {3, "float"},
-		TextureSpeed = {3, "float"},
-		ZOffset = {3, "float"},
-		-- Attachment0 = {3, "ref"},
-		-- Attachment1 = {3, "ref"},
-		CurveSize0 = {3, "float"},
-		CurveSize1 = {3, "float"},
-		Width0 = {3, "float"},
-		Width1 = {3, "float"},
+		Brightness = {1, "float"},
+		LightEmission = {1, "float"},
+		LightInfluence = {1, "float"},
+		Texture = {1, "ContentId"},
+		TextureLength = {1, "float"},
+		TextureSpeed = {1, "float"},
+		ZOffset = {1, "float"},
+		Attachment0 = {1, "ref"},
+		Attachment1 = {1, "ref"},
+		CurveSize0 = {1, "float"},
+		CurveSize1 = {1, "float"},
+		Width0 = {1, "float"},
+		Width1 = {1, "float"},
 	},
 	Clothing = {
-		Color3 = {3, "Color3"}
+		Color3 = {1, "Color3"}
 	},
 	Shirt = {
-		ShirtTemplate = {3, "ContentId", "Template", "Clothing"}
+		ShirtTemplate = {1, "ContentId"}
 	},
-	--Pants = {
-	--	PantsTemplate = {3, "ContentId", "Template", "Clothing"}
-	--},
+	Pants = {
+		PantsTemplate = {1, "ContentId"}
+	},
+	ShirtGraphic = {
+		Color3 = {1, "Color3"},
+		Graphic = {1, "ContentId"}
+	},
+	Skin = {
+		SkinColor = {1, "BrickColor"}
+	},
+	LocalizationTable = {
+		SourceLocaleId = {1, "string"}
+	},
 	--Attachment = {
 	--	CFrame = { -- Component order is strange
-	--		2, 
-	--		"CoordinateFrame",
+	--		2, "CoordinateFrame",
 	--		function(inst)
 	--			if Offsets and Offsets.Attachment.Position then
 	--				local Offset = Offsets.Attachment.Position 
-	--			local CFrame = {}
+	--				local CFrame = {}
 	--				
 	--				CFrame.RightVector = memory.readvector(Data, Offset - 12)
 	--				CFrame.Position = memory.readvector(Data, Offset)
@@ -273,199 +506,680 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 	--		end
 	--	}
 	--},
-	--Weld = {
-	--	Part0 = {3, "ref"},
-	--	Part1 = {3, "ref"}
-	--},
-	--WeldConstraint = {
-	--	Part0 = {3, "ref"},
-	--	Part1 = {3, "ref"}
-	--},
+	WeldConstraint = {
+		Part0Internal = {1, "ref", "Part0"},
+		Part1Internal = {1, "ref", "Part1"},
+		Enabled = {1, "bool"},
+		CFrame0 = {1, "CoordinateFrame", nil, nil, "ExplicitWeldJoint"}
+	},
+	JointInstance = {
+		Part0 = {1, "ref"},
+		Part1 = {1, "ref"},
+		C0 = {1, "CoordinateFrame", nil, nil, "Joint"},
+		C1 = {1, "CoordinateFrame", nil, nil, "Joint"},
+		Enabled = {1, "bool"}
+	},
+	DynamicRotate = {
+		BaseAngle = {1, "float", nil, nil, "Joint"}
+	},
+	Glue = {
+		F0 = {1, "Vector3"},
+		F1 = {1, "Vector3"},
+		F2 = {1, "Vector3"},
+		F3 = {1, "Vector3"}
+	},
+	Motor = {
+		CurrentAngle = {1, "float", nil, nil, "Joint"},
+		DesiredAngle = {1, "float", nil, nil, "Joint"},
+		MaxVelocity = {1, "float", nil, nil, "Joint"},
+	},
+	VelocityMotor = {
+		CurrentAngle = {1, "float", nil, nil, "Joint"},
+		DesiredAngle = {1, "float", nil, nil, "Joint"},
+		MaxVelocity = {1, "float", nil, nil, "Joint"},
+		Hole = {1, "ref"}
+	},
+	Feature = {
+		FaceId = {1, "token"},
+		InOut = {1, "token"},
+		LeftRight = {1, "token"},
+		TopBottom = {1, "token"}
+	},
 	PartOperation = {
-		AssetId = {3, "ContentId", nil, "UnionOperation"},
-		InitialSize = {3, "Vector3", "MeshSize", "MeshPart"}
+		AssetId = {1, "ContentId", nil, "UnionOperation"}
 	},
 	Decal = {
-		Texture = {3, "ContentId", "Decal_Texture", "Textures"}		
+		Texture = {1, "ContentId", "Decal_Texture", "Textures"}		
+	},
+	LuaSourceContainer = {
+		ScriptGuid = {1, "string", "GUID", "Script"},
+	},
+	BaseScript = {
+		Disabled = {1, "bool"},
+		RunContext = {1, "token"}
+	},
+	Script = {
+		Source = {3, "ProtectedString"}
+	},
+	ModuleScript = {
+		Source = {3, "ProtectedString"}
+	},
+	GuiBase2d = {
+		AutoLocalize = {1, "bool"},
+		RootLocalizationTable = {1, "ref"},
+		SelectionGroup = {1, "bool"},
+		SelectionBehaviorDown = {1, "token"},
+		SelectionBehaviorLeft = {1, "token"},
+		SelectionBehaviorRight = {1, "token"},
+		SelectionBehaviorUp = {1, "token"}
+	},
+	LayerCollector = {
+		Enabled = {1, "bool"},
+		ResetOnSpawn = {1, "bool"},
+		ZIndexBehavior = {1, "token"}
+	},
+	ScreenGui = {
+		ClipToDeviceSafeArea = {1, "bool"},
+		DisplayOrder = {1, "int"},
+		SafeAreaCompatibility = {1, "token"},
+		ScreenInsets = {1, "token"}
+	},
+	SurfaceGuiBase = {
+		Active = {1, "bool"},
+		Adornee = {1, "ref"},
+		Face = {1, "token"}
+	},
+	SurfaceGui = {
+		AlwaysOnTop = {1, "bool"},
+		Brightness = {1, "float"},
+		CanvasSize = {1, "Vector2"},
+		ClipsDescendants = {1, "bool"},
+		LightInfluence = {1, "float"},
+		MaxDistance = {1, "float"},
+		PixelsPerStud = {1, "float"},
+		SizingMode = {1, "token"},
+		ToolPunchThroughDistance = {1, "float"},
+		ZOffset = {1, "float"}
+	},
+	AdGui = {
+		FallbackImage = {1, "ContentId"},
+		EnableVideoAds = {1, "bool"}
+	},
+	BillboardGui = {
+		Active = {1, "bool"},
+		Adornee = {1, "ref"},
+		AlwaysOnTop = {1, "bool"},
+		Brightness = {1, "float"},
+		ClipsDescendants = {1, "bool"},
+		DistanceLowerLimit = {1, "float"},
+		DistanceUpperLimit = {1, "float"},
+		ExtentsOffset = {1, "Vector3"},
+		ExtentsOffsetWorldSpace = {1, "Vector3"},
+		LightInfluence = {1, "float"},
+		MaxDistance = {1, "float"},
+		Size = {1, "UDim2"},
+		SizeOffset = {1, "Vector2"},
+		StudsOffset = {1, "Vector3"},
+		StudsOffsetWorldSpace = {1, "Vector3"},
+	},
+	GuiObject = {
+		Position = {1, "UDim2"},
+		Size = {1, "UDim2"},
+		Visible = {1, "bool"},
+		BackgroundColor3 = {1, "Color3"},
+		BorderColor3 = {1, "Color3"},
+		LayoutOrder = {1, "int"},
+		ZIndex = {1, "int"},
+		BackgroundTransparency = {1, "float"},
+		Rotation = {1, "float"},
+		Active = {1, "bool"},
+		AnchorPoint = {1, "Vector2"},
+		AutomaticSize = {1, "token"},
+		BorderMode = {1, "token"},
+		BorderSizePixel = {1, "int"},
+		ClipsDescendants = {1, "bool"},
+		Interactable = {1, "bool"},
+		Selectable = {1, "bool"},
+		SelectionOrder = {1, "int"},
+		SizeConstraint = {1, "token"},
+		Draggable = {1, "bool"},
+		NextSelectionDown = {1, "ref"},
+		NextSelectionLeft = {1, "ref"},
+		NextSelectionRight = {1, "ref"},
+		NextSelectionUp = {1, "ref"},
+		SelectionImageObject = {1, "ref"},
+		Sink = {1, "token", "InputSink"}
+	},
+	Frame = {
+		Style = {1, "token"}
+	},
+	CanvasGroup = {
+		GroupColor3 = {1, "Color3"},
+		GroupTransparency = {1, "float"}
+	},
+	ImageLabel = {
+		Image = {1, "ContentId"},
+		ImageColor3 = {1, "Color3"},
+		ImageRectOffset = {1, "Vector2"},
+		ImageRectSize = {1, "Vector2"},
+		ImageTransparency = {1, "float"},
+		ResampleMode = {1, "token"},
+		ScaleType = {1, "token"},
+		SliceCenter = {1, "Rect2D"},
+		SliceScale = {1, "float"},
+		TileSize = {1, "UDim2"}
+	},
+	ImageButton = {
+		Image = {1, "ContentId"},
+		ImageColor3 = {1, "Color3"},
+		ImageRectOffset = {1, "Vector2"},
+		ImageRectSize = {1, "Vector2"},
+		ImageTransparency = {1, "float"},
+		ResampleMode = {1, "token"},
+		ScaleType = {1, "token"},
+		SliceCenter = {1, "Rect2D"},
+		SliceScale = {1, "float"},
+		TileSize = {1, "UDim2"},
+		PressedImage = {1, "ContentId"},
+		HoverImage = {1, "ContentId"}
+	},
+	TextLabel = {
+		Text = {1, "string"},
+		TextColor3 = {1, "Color3"},
+		MaxVisibleGraphemes = {1, "int"},
+		RichText = {1, "bool"},
+		LineHeight = {1, "float"},
+		TextDirection = {1, "token"},
+		TextScaled = {1, "bool"},
+		TextSize = {1, "float"},
+		TextStrokeColor3 = {1, "Color3"},
+		TextStrokeTransparency = {1, "float"},
+		TextTransparency = {1, "float"},
+		TextTruncate = {1, "token"},
+		TextWrapped = {1, "bool"},
+		TextXAlignment = {1, "token"},
+		TextYAlignment = {1, "token"},
+		LocalizationMatchIdentifier = {1, "string"},
+		LocalizationMatchedSourceText = {1, "string"},
+		FontFace = {1, "Font"},
+		OpenTypeFeatures = {1, "string", nil, nil, "OpenTypeFeatures"}
+	},
+	GuiButton = {
+		AutoButtonColor = {1, "bool"},
+		Modal = {1, "bool"},
+		Selected = {1, "bool"},
+		Style = {1, "token"},
+		HoverHapticEffect = {1, "ref"},
+		PressHapticEffect = {1, "ref"}
+	},
+	TextButton = {
+		Text = {1, "string"},
+		TextColor3 = {1, "Color3"},
+		MaxVisibleGraphemes = {1, "int"},
+		RichText = {1, "bool"},
+		LineHeight = {1, "float"},
+		TextDirection = {1, "token"},
+		TextScaled = {1, "bool"},
+		TextSize = {1, "float"},
+		TextStrokeColor3 = {1, "Color3"},
+		TextStrokeTransparency = {1, "float"},
+		TextTransparency = {1, "float"},
+		TextTruncate = {1, "token"},
+		TextWrapped = {1, "bool"},
+		TextXAlignment = {1, "token"},
+		TextYAlignment = {1, "token"},
+		LocalizationMatchIdentifier = {1, "string"},
+		LocalizationMatchedSourceText = {1, "string"},
+		FontFace = {1, "Font"},
+		OpenTypeFeatures = {1, "string", nil, nil, "OpenTypeFeatures"}
+	},
+	TextBox = {
+		ClearTextOnFocus = {1, "bool"},
+		MultiLine = {1, "bool"},
+		ShowNativeInput = {1, "bool"},
+		TextEditable = {1, "bool"},
+		PlaceholderText = {1, "string"},
+		PlaceholderColor3 = {1, "Color3"},
+		Text = {1, "string"},
+		TextColor3 = {1, "Color3"},
+		MaxVisibleGraphemes = {1, "int"},
+		RichText = {1, "bool"},
+		LineHeight = {1, "float"},
+		TextDirection = {1, "token"},
+		TextScaled = {1, "bool"},
+		TextSize = {1, "float"},
+		TextStrokeColor3 = {1, "Color3"},
+		TextStrokeTransparency = {1, "float"},
+		TextTransparency = {1, "float"},
+		TextTruncate = {1, "token"},
+		TextWrapped = {1, "bool"},
+		TextXAlignment = {1, "token"},
+		TextYAlignment = {1, "token"},
+		LocalizationMatchIdentifier = {1, "string"},
+		LocalizationMatchedSourceText = {1, "string"},
+		FontFace = {1, "Font"},
+		OpenTypeFeatures = {1, "string", nil, nil, "OpenTypeFeatures"}
+	},
+	ScrollingFrame = {
+		AutomaticCanvasSize = {1, "token"},
+		BottomImage = {1, "ContentId"},
+		CanvasPosition = {1, "Vector2"},
+		CanvasSize = {1, "UDim2"},
+		ElasticBehavior = {1, "token"},
+		HorizontalScrollBarInset = {1, "token"},
+		MidImage = {1, "ContentId"},
+		ScrollBarImageColor3 = {1, "Color3"},
+		ScrollBarImageTransparency = {1, "float"},
+		ScrollBarThickness = {1, "int"},
+		ScrollingDirection = {1, "token"},
+		ScrollingEnabled = {1, "bool"},
+		TopImage = {1, "ContentId"},
+		VerticalScrollBarInset = {1, "token"},
+		VerticalScrollBarPosition = {1, "token"}
+	},
+	InputActionLabel = {
+		ImageColor3 = {1, "Color3"},
+		ImageTransparency = {1, "float"},
+		InputAction = {1, "ref"},
+		TextColor3 = {1, "Color3"},
+		TextSize = {1, "float"},
+		TextTransparency = {1, "float"},
+		TextWrapped = {1, "bool"},
+		TextXAlignment = {1, "token"},
+		TextYAlignment = {1, "token"},
+		FontFace = {1, "Font"}
+	},
+	VideoDisplay = {
+		ResampleMode = {1, "token"},
+		ScaleType = {1, "token"},
+		TileSize = {1, "UDim2"},
+		VideoColor3 = {1, "Color3"},
+		VideoRectOffset = {1, "Vector2"},
+		VideoRectSize = {1, "Vector2"},
+		VideoTransparency = {1, "float"}
+	},
+	VideoPlayer = {
+		InternalVideoUsage = {1, "token"},
+		Looping = {1, "bool"},
+		MaximumResolution = {1, "token"},
+		PlaybackSpeed = {1, "float"},
+		TimePosition = {1, "double"},
+		Volume = {1, "float"}
+	},
+	VideoFrame = {
+		InternalVideoUsage = {1, "token"},
+		Looped = {1, "bool"},
+		MaximumResolution = {1, "token"},
+		Playing = {1, "bool"},
+		RollOffMaxDistance = {1, "float"},
+		RollOffMinDistance = {1, "float"},
+		RollOffMode = {1, "token"},
+		TimePosition = {1, "double"},
+		Video = {1, "ContentId"},
+		Volume = {1, "float"}
+	},
+	ViewportFrame = {
+		Ambient = {1, "Color3"},
+		CameraCFrame = {1, "CoordinateFrame"},
+		CameraFieldOfView = {2, "float", RadiansToDegrees},
+		ImageColor3 = {1, "Color3"},
+		ImageTransparency = {1, "float"},
+		LightColor = {1, "Color3"},
+		LightDirection = {1, "Vector3"}
+	},
+	TextChannelWindow = {
+		Target = {1, "ref"},
+		UseDefaultFont = {1, "bool"},
+		FontFace = {1, "Font"}
+	},
+	TextChannel = {
+		AddPlayersOnJoin = {1, "bool"}
+	},
+	Message = {
+		Text = {1, "string"}
+	},
+	Folder = {
+		IconTint = {2, "Color3", Color3uint8ToColor3}
+	},
+	PVAdornment = {
+		Adornee = {1, "ref", nil, "Misc"}
+	},
+	HandleAdornment = {
+		CFrame = {1, "CoordinateFrame"}
 	},
 	BasePart = {
-		Size = {3, "Vector3", nil, nil, "Primitive"},
-		CFrame = {3, "CoordinateFrame", "Rotation", nil, "Primitive"},
-		CanCollide = {1, "bool"},
+		size = {1, "Vector3", "Size", nil, "Primitive"},
+		CFrame = {1, "CoordinateFrame", "Rotation", nil, "Primitive"},
+		Velocity = {1, "Vector3", "AssemblyLinearVelocity", nil, "Primitive"},
+		RotVelocity = {1, "Vector3", "AssemblyAngularVelocity", nil, "Primitive"},
+		Material = {
+			2, "token", 
+			function(inst)
+				return memory.readu16(memory.readu64(inst, PrimitiveOffset), MaterialOffset)
+			end
+		},
+		RootPriority = {
+			2, "int",
+			function(inst)
+				return memory.readi8(memory.readu64(inst, PrimitiveOffset), RootPriorityOffset)
+			end
+		},
+		EnableFluidForces = {1, "bool", nil, nil, "Primitive"},
+		Anchored = {2, "bool", ReadPrimitiveFlag},
+		CanCollide = {2, "bool", ReadPrimitiveFlag},
+		CanTouch = {2, "bool", ReadPrimitiveFlag},
+		CanQuery = {2, "bool", ReadPrimitiveFlag},
+		Reflectance = {1, "float"},
 		Transparency = {1, "float"},
-		Shape = {3, "token"},
-		Color = {3, "Color3uint8", "Color3"},
-		CastShadow = {3, "bool"},
-		Locked = {3, "bool"},
-		Massless = {3, "bool"},
-		TopSurface = {2, "token", function() return 0 end} -- If this value isn't provided, it defaults to studs
+		LocalTransparencyModifier = {1, "float"},
+		Color3uint8 = {1, "Color3uint8", "Color3"},
+		AudioCanCollide = {1, "bool"},
+		CastShadow = {1, "bool"},
+		Locked = {1, "bool"},
+		Massless = {1, "bool"},
+		BackParamA = {1, "float"},
+		BackParamB = {1, "float"},
+		BackSurface = {1, "token"},
+		BackSurfaceInput = {1, "token"},
+		BottomParamA = {1, "float"},
+		BottomParamB = {1, "float"},
+		BottomSurface = {1, "token"},
+		BottomSurfaceInput = {1, "token"},
+		FrontParamA = {1, "float"},
+		FrontParamB = {1, "float"},
+		FrontSurface = {1, "token"},
+		FrontSurfaceInput = {1, "token"},
+		LeftParamA = {1, "float"},
+		LeftParamB = {1, "float"},
+		LeftSurface = {1, "token"},
+		LeftSurfaceInput = {1, "token"},
+		RightParamA = {1, "float"},
+		RightParamB = {1, "float"},
+		RightSurface = {1, "token"},
+		RightSurfaceInput = {1, "token"},
+		TopParamA = {1, "float"},
+		TopParamB = {1, "float"},
+		TopSurface = {1, "token"},
+		TopSurfaceInput = {1, "token"}
+	},
+	Part = {
+		shape = {1, "token", "Shape", "BasePart"},
+	},
+	FlagStand = {
+		TeamColor = {1, "BrickColor"}
+	},
+	TrussPart = {
+		style = {1, "token", "Style"}
+	},
+	SkateboardPlatform = {
+		StickyWheels = {1, "bool"}
+	},
+	TriangleMeshPart = {
+		InitialSize = {1, "Vector3", "MeshSize", "MeshPart"}
 	},
 	MeshPart = {
 		MeshId = {1, "ContentId"},
-		TextureId = {1, "ContentId"},
-		InitialSize = {3, "Vector3", "MeshSize"}
-	},
-	Player = {
-		Team = {1, "ref"},
-		-- UserId = {1, "int64"}, Not Needed
-		Character = {1, "ref"},
-		-- DisplayName = {1, "string"}, Not Needed
-		HealthDisplayDistance = {3, "float"},
-		NameDisplayDistance = {3, "float"},
-		-- Team = {3, "ref"},
-		TeamColor = {3, "BrickColor"},
-		-- AccountAge = {3, "int"}, Not Needed
-		CameraMinZoomDistance = {3, "float", "MinZoomDistance"},
-		CameraMaxZoomDistance = {3, "float", "MaxZoomDistance"},
-		CameraMode = {3, "token"},
+		TextureID = {1, "ContentId", "Texture"}
 	},
 	Model = {
-		-- PrimaryPart = {1, "ref"},
-		ScaleFactor = {3, "float", "Scale"}
+		PrimaryPart = {1, "ref"},
+		ScaleFactor = {1, "float", "Scale"},
+		LevelOfDetail = {1, "token"},
+		ModelStreamingMode = {1, "token"}
+	},
+	ProceduralModel = {
+		Size = {1, "Vector3"},
+		Generator = {1, "ref"}
 	},
 	Humanoid = {
 		MaxHealth = {1, "float"},
 		Health = {1, "float"},
-		AutoJumpEnabled = {3, "bool"},
-		AutoRotate = {3, "bool"},
-		AutomaticScalingEnabled = {3, "bool"},
-		BreakJointsOnDeath = {3, "bool"},
-		EvaluateStateMachine = {3, "bool"},
-		Jump = {3, "bool"},
-		PlatformStand = {3, "bool"},
-		RequiresNeck = {3, "bool"},
-		Sit = {3, "bool"},
-		UseJumpPower = {3, "bool"},
-		CameraOffset = {3, "Vector3"},
-		DisplayDistanceType = {3, "token"},
-		DisplayName = {3, "string"},
-		HealthDisplayDistance = {3, "float"},
-		HealthDisplayType = {3, "token"},
-		HipHeight = {3, "float"},
-		JumpHeight = {3, "float"},
-		JumpPower = {3, "float"},
-		MaxSlopeAngle = {3, "float"},
-		NameDisplayDistance = {3, "float"},
-		NameOcclusion = {3, "token"},
-		RigType = {3, "token"},
-		--SeatPart = {3, "ref"},
-		Walkspeed = {3, "float"},
-		WalkToPoint = {3, "Vector3", "MoveToPoint"},
-		WalkToPart = {3, "Vector3", "MoveToPart"},
-		FloorMaterial = {3, "token"},
-		MoveDirection = {3, "Vector3"},
-		--HumanoidRootPart = {3, "ref"}
+		AutoJumpEnabled = {1, "bool"},
+		AutoRotate = {1, "bool"},
+		AutomaticScalingEnabled = {1, "bool"},
+		BreakJointsOnDeath = {1, "bool"},
+		EvaluateStateMachine = {1, "bool"},
+		Jump = {1, "bool"},
+		PlatformStand = {1, "bool"},
+		RequiresNeck = {1, "bool"},
+		Sit = {1, "bool"},
+		UseJumpPower = {1, "bool"},
+		CameraOffset = {1, "Vector3"},
+		DisplayDistanceType = {1, "token"},
+		DisplayName = {1, "string"},
+		HealthDisplayDistance = {1, "float"},
+		HealthDisplayType = {1, "token"},
+		HipHeight = {1, "float"},
+		JumpHeight = {1, "float"},
+		JumpPower = {1, "float"},
+		MaxSlopeAngle = {1, "float"},
+		NameDisplayDistance = {1, "float"},
+		NameOcclusion = {1, "token"},
+		RigType = {1, "token"},
+		SeatPart = {1, "ref"},
+		Walkspeed = {1, "float"},
+		WalkToPoint = {1, "Vector3", "MoveToPoint"},
+		WalkToPart = {1, "Vector3", "MoveToPart"},
+		FloorMaterial = {1, "token"},
+		MoveDirection = {1, "Vector3"},
+		HumanoidRootPart = {1, "ref"}
+	},
+	ForceField = {
+		Visible = {1, "bool"}
 	},
 	ProximityPrompt = {
-		Enabled = {3, "bool"},
-		RequiresLineOfSight = {3, "bool"},
-		ActionText = {3, "string"},
-		ObjectText = {3, "string"},
-		HoldDuration = {3, "float"},
-		MaxActivationDistance = {3, "float"},
-		KeyboardKeyCode = {3, "token", "KeyCode"},
-		GamepadKeyCode = {3, "token"}
+		Enabled = {1, "bool"},
+		RequiresLineOfSight = {1, "bool"},
+		ActionText = {1, "string"},
+		ObjectText = {1, "string"},
+		HoldDuration = {1, "float"},
+		MaxActivationDistance = {1, "float"},
+		KeyboardKeyCode = {1, "token", "KeyCode"},
+		GamepadKeyCode = {1, "token"}
 	},
 	ClickDetector = {
-		MaxActivationDistance = {3, "float"},
-		CursorIcon = {3, "ContentId", "MouseIcon"}
+		MaxActivationDistance = {1, "float"},
+		CursorIcon = {1, "ContentId", "MouseIcon"}
 	},
 	DragDetector = {
-		--ReferenceInstance = {3, "ref"},
-		MaxDragAngle = {3, "float"},
-		MaxDragTranslation = {3, "Vector3"},
-		MinDragAngle = {3, "float"},
-		MinDragTranslation = {3, "Vector3"},
-		ActivatedCursorIcon = {3, "ContentId"},
-		MaxForce = {3, "float"},
-		MaxTorque = {3, "float"},
-		Responsiveness = {3, "float"}
+		ReferenceInstance = {1, "ref"},
+		MaxDragAngle = {1, "float"},
+		MaxDragTranslation = {1, "Vector3"},
+		MinDragAngle = {1, "float"},
+		MinDragTranslation = {1, "Vector3"},
+		ActivatedCursorIcon = {1, "ContentId"},
+		MaxForce = {1, "float"},
+		MaxTorque = {1, "float"},
+		Responsiveness = {1, "float"},
+		ApplyAtCenterOfMass = {1, "bool"},
+		Enabled = {1, "bool"},
+		RunLocally = {1, "bool"},
+		GamepadModeSwitchKeyCode = {1, "token"},
+		KeyboardModeSwitchKeyCode = {1, "token"},
+		VRSwitchKeyCode = {1, "token"},
+		PermissionPolicy = {1, "token"},
+		ResponseStyle = {1, "token"},
+		DragStyle = {1, "token"},
+		TrackballRadialPullFactor = {1, "float"},
+		TrackballRollFactor = {1, "float"}
 	},
 	SpawnLocation = {
-		Enabled = {3, "bool"},
-		Neutral = {3, "bool"},
-		AllowTeamChangeOnTouch = {3, "bool"}
+		Enabled = {1, "bool"},
+		Neutral = {1, "bool"},
+		AllowTeamChangeOnTouch = {1, "bool"},
+		TeamColor = {1, "BrickColor"},
+		Duration = {1, "int", "ForcefieldDuration"}
 	},
 	AnimationTrack = {
-		Animation = {3, "ref"},
-		Speed = {3, "float"},
-		TimePosition = {3, "float"},
-		Looped = {3, "bool"},
-		IsPlaying = {3, "bool"},
+		Animation = {1, "ref"},
+		Speed = {1, "float"},
+		TimePosition = {1, "float"},
+		Looped = {1, "bool"},
 	},
 	PostEffect = {
-		Enabled = {3, "bool", nil, "BloomEffect"}
+		Enabled = {1, "bool", nil, "BloomEffect"}
 	},
 	BloomEffect = {
-		Intensity = {3, "float"},
-		Threshold = {3, "float"},
-		Size = {3, "float"}
+		Intensity = {1, "float"},
+		Threshold = {1, "float"},
+		Size = {1, "float"},
 	},
 	BlurEffect = {
-		Size = {3, "float"}
+		Size = {1, "float"}
 	},
 	ColorCorrectionEffect = {
-		Brightness = {3, "float"},
-		Contrast = {3, "float"},
-		TintColor = {3, "Color3"}
+		Brightness = {1, "float"},
+		Contrast = {1, "float"},
+		TintColor = {1, "Color3"},
+		Saturation = {1, "float"},
+		ColorLutContent = {1, "string"},
+		ColorLutIntensity = {1, "float"}
 	},
 	ColorGradingEffect = {
-		TonemapperPreset = {3, "token"}
+		TonemapperPreset = {1, "token"}
 	},
 	DepthOfFieldEffect = {
-		FocusDistance = {3, "float"},
-		FarIntensity = {3, "float"},
-		NearIntensity = {3, "float"},
-		InFocusRadius = {3, "float"}
+		FocusDistance = {1, "float"},
+		FarIntensity = {1, "float"},
+		NearIntensity = {1, "float"},
+		InFocusRadius = {1, "float"}
 	},
 	SunRaysEffect = {
-		Intensity = {3, "float"},
-		Spread = {3, "float"}
+		Intensity = {1, "float"},
+		Spread = {1, "float"}
 	},
 	Sound = {
-		IsPlaying = {3, "bool"},
-		Looped = {3, "bool"},
-		SoundId = {3, "ContentId"},
-		RollOffMaxDistance = {3, "float"},
-		RollOffMinDistance = {3, "float"},
-		PlaybackSpeed = {3, "float"},
-		Volume = {3, "float"},
-		-- SoundGroup = {3, "ref"}
+		Looped = {1, "bool"},
+		SoundId = {1, "ContentId"},
+		RollOffMaxDistance = {1, "float"},
+		RollOffMinDistance = {1, "float"},
+		PlaybackSpeed = {1, "float"},
+		Volume = {1, "float"},
+		SoundGroup = {1, "ref"}
 	},
 	Atmosphere = {
-		Color = {3, "Color3"},
-		Decay = {3, "Color3"},
-		Density = {3, "float"},
-		Glare = {3, "float"},
-		Haze = {3, "float"},
-		Offset = {3, "float"}
-	},
-	UserInputService = {
-		MouseBehavior = {1, "token"},
-		MouseDeltaSensitivity = {1, "float"},
-		MouseIconEnabled = {1, "bool"}
+		Color = {1, "Color3"},
+		Decay = {1, "Color3"},
+		Density = {1, "float"},
+		Glare = {1, "float"},
+		Haze = {1, "float"},
+		Offset = {1, "float"}
 	},
 	BoolValue = {
-		Value = {1, "bool"}
+		Value = {1, "bool", nil, "Misc"}
 	},
 	IntValue = {
+		Value = {1, "int64", nil, "Misc"}
+	},
+	IntConstrainedValue = {
+		MinValue = {1, "int64"},
+		MaxValue = {1, "int64"},
 		Value = {1, "int64"}
 	},
 	NumberValue = {
+		Value = {1, "double", nil, "Misc"}
+	},
+	DoubleConstrainedValue = {
+		MinValue = {1, "double"},
+		MaxValue = {1, "double"},
 		Value = {1, "double"}
 	},
 	ObjectValue = {
-		Value = {1, "ref"}
+		Value = {1, "ref", nil, "Misc"}
 	},
 	StringValue = {
-		Value = {1, "string"}
+		Value = {1, "string", nil, "Misc"}
 	},
 	Vector3Value = {
-		Value = {1, "Vector3"}
+		Value = {1, "Vector3", nil, "Misc"}
+	},
+	BrickColorValue = {
+		Value = {1, "BrickColor", nil, "Misc"}
+	},
+	Color3Value = {
+		Value = {1, "Color3", nil, "Misc"}
+	},
+	CFrameValue = {
+		Value = {1, "CoordinateFrame", nil, "Misc"}
+	},
+	RayValue = {
+		Value = {1, "Ray", nil, "Misc"}
+	},
+	BinaryStringValue = {
+		Value = {1, "BinaryString", nil, "Misc"}
 	}
-	-- .Value on the other ValueBase subclasses cannot be read by Severe
 }
 
+local ScriptCache = {}
+
+local function DecompressBytecode(OriginalData)
+	local OriginalLength = buffer.len(OriginalData)
+	local RSB1 = buffer.fromstring("RSB1")
+	local Hash = buffer.create(4)
+	buffer.copy(Hash, 0, OriginalData, 0, 4)
+	local DecodedData = buffer.create(OriginalLength)
+	
+	for i = 0, 3 do
+		local Byte = buffer.readu8(Hash, i)
+		local XORed = bit32.bxor(Byte, buffer.readu8(RSB1, i))
+		local Transformed = (XORed - i * 41)
+		buffer.writeu8(Hash, i, Transformed)
+	end
+	
+	for i = 0, OriginalLength - 1 do
+		local Byte = buffer.readu8(OriginalData, i)
+		buffer.writeu8(DecodedData, i, bit32.bxor(Byte, buffer.readu8(Hash, i % 4) + i * 41))
+	end
+	
+	local CompressedData = buffer.create(OriginalLength - 8)
+	buffer.copy(CompressedData, 0, DecodedData, 8)
+	return ZSTDDecompress(CompressedData)
+end
+
+local function GetScriptSource(Instance, Decompile, SaveBytecode, DecompileFunction)
+	local ClassName = GetClassName(Instance)
+	local BytecodeOffset = Offsets[ClassName].Bytecode
+	if not BytecodeOffset then
+		return "Failed to get bytecode: unable to find bytecode offset"
+	end
+	
+	if ClassName == "Script" and memory.readi32(Instance, RunContextOffset) ~= 2 then
+		return "-- [FilteringEnabled] Server Scripts are IMPOSSIBLE to save"
+	end
+	
+	local Bytecode
+	do
+		local BytecodeInfo = memory.readu64(Instance, BytecodeOffset)
+		local Pointer = memory.readu64(BytecodeInfo, Offsets.Bytecode.Pointer)
+		local Size = memory.readu64(BytecodeInfo, Offsets.Bytecode.Size)
+		local CompressedBytecode = memory.readbuffer(Pointer, Size)
+		
+		Bytecode = buffer.tostring(DecompressBytecode(CompressedBytecode))
+	end
+	
+	local Source = ""
+	if SaveBytecode then
+		Source ..= "\n\n-- Bytecode (Base64):\n-- " .. Base64Encode(Bytecode) .. "\n\n" -- Newlines at the start are for compatability with UniversalSynSaveInstance bytecode postproccessors
+	end
+	
+	if Decompile then
+		print("Decompiling Script: " .. GetName(Instance))
+		local DecompiledScript
+		local CachedScript = ScriptCache[Bytecode]
+		if CachedScript then
+			DecompiledScript = CachedScript
+		else
+			task.wait(0.75) -- Prevent script timeout
+			DecompiledScript = DecompileFunction(Bytecode)
+			ScriptCache[Bytecode] = DecompiledScript
+		end
+		Source ..= DecompiledScript
+	end
+	
+	return Source
+end
+
+-- Escapes (credit: UniversalSynSaveInstance)
 local ESCAPES_PATTERN = "[&<>\"'\0\1-\9\11-\12\14-\31\127-\255]"
 local ESCAPES = {
 	["&"] = "&amp;", -- 38
@@ -494,13 +1208,19 @@ Descriptors = {
 		end
 		return raw
 	end,
-	string = function(raw) 
-		return (raw == nil or raw == "") and ""
+	string = function(raw)
+		return (raw == nil or raw == "" or string.find(raw, "\0", 1, true)) and ""
 			or string.find(raw, "]]>", 1, true) and string.gsub(raw, ESCAPES_PATTERN, ESCAPES)
-			or "<![CDATA[" .. string.gsub(raw, "\0", "") .. "]]>"
+			or "<![CDATA[" .. raw.. "]]>"
+	end,
+	ProtectedString = function(raw)
+		return string.find(raw, "]]>", 1, true) and string.gsub(raw, ESCAPES_PATTERN, ESCAPES) or "<![CDATA[" .. raw .. "]]>"
 	end,
 	ContentId = function(raw)
 		return raw == "" and "<null></null>" or "<url>" .. Descriptors.string(raw) .. "</url>"
+	end,
+	Content= function(raw)
+		return raw == "" and "<null></null>" or "<uri>" .. Descriptors.string(raw) .. "</uri>"
 	end,
 	Vector2 = function(raw)
 		return "<X>" .. raw.X .. "</X><Y>" .. raw.Y .. "</Y>"
@@ -511,11 +1231,7 @@ Descriptors = {
 	token = function(raw) return raw end, -- Enum
 	BrickColor = function(raw) return raw end,
 	ref = function(raw) -- Class category
-		local CanRead, ClassName = pcall(function() return raw.ClassName end)
-		if CanRead and ClassName ~= "" then -- CanRead usually fails when the class category property is nil (Severe returns an empty intance), but I've seen random failures in other cases
-			return raw.Data
-		end
-		return "null"
+		return raw == 0 and "null" or raw
 	end,
 	CoordinateFrame = function(raw) -- CFrame
 		return "<X>" .. raw.Position.X .. "</X><Y>" .. raw.Position.Y .. "</Y><Z>" .. raw.Position.Z .. "</Z><R00>".. raw.RightVector.X .. "</R00><R01>" .. raw.RightVector.Y .. "</R01><R02>" .. raw.RightVector.Z .. "</R02><R10>" .. raw.UpVector.X .. "</R10><R11>" .. raw.UpVector.Y .. "</R11><R12>" .. raw.UpVector.Z .. "</R12><R20>" .. raw.LookVector.X .. "</R20><R21>" .. raw.LookVector.Y .. "</R21><R22>" .. raw.LookVector.Z .. "</R22>"
@@ -534,10 +1250,26 @@ Descriptors = {
 			+ (math.floor(raw.R) * 0x10000)
 			+ (math.floor(raw.G) * 0x100)
 			+ math.floor(raw.B)
+	end,
+	NumberRange = function(raw)
+		return table.concat(raw, " ")
+	end,
+	UDim2 = function(raw)
+		return "<XS>" .. raw.XS .. "</XS><XO>" .. raw.XO .. "</XO><YS>" .. raw.YS .. "</YS><YO>" .. raw.YO .. "</YO>"
+	end,
+	Ray = function(raw)
+		return "<origin><X>" .. raw.Origin.X .. "</X><Y>" .. raw.Origin.Y .. "</Y><Z>" .. raw.Origin.Z .. "</Z></origin><direction><X>" .. raw.Direction.X .. "</X><Y>" .. raw.Direction.Y .. "</Y><Z>" .. raw.Direction.Z .. "</Z></direction>"
+	end,
+	Font = function(raw)
+		local Style = raw.Style and "Italic" or "Normal"
+		return "<Family>" .. Descriptors.ContentId(raw.Family) .. "</Family><Weight>" .. raw.Weight .. "</Weight><Style>" .. Style .. "</Style><CachedFaceId>" .. Descriptors.ContentId(raw.CachedFaceId) .. "</CachedFaceId>"
+	end,
+	Rect2D = function(raw)
+		return "<min><X>" .. raw.MinX .. "</X><Y>" .. raw.MinY .. "</Y></min><max><X>" .. raw.MaxX .. "</X><Y>" .. raw.MaxY .. "</Y></max>"
 	end
 }
 
-for descriptorName, redirectName in
+for DescriptorName, RedirectName in
 	{
 		int = "Number",
 		int64 = "Number",
@@ -545,14 +1277,15 @@ for descriptorName, redirectName in
 		double = "Number"
 	}
 do
-	Descriptors[descriptorName] = Descriptors[redirectName]
+	Descriptors[DescriptorName] = Descriptors[RedirectName]
 end
 
-local ExpectedTypeOfResults = {
+--[[ local ExpectedTypeOfResults = {
 	string = "string",
 	ContentId = "string",
+	Content = "string",
 	BinaryString = "string",
-	ref = "Instance",
+	ref = "number",
 	float = "number",
 	int = "number",
 	int64 = "number",
@@ -564,93 +1297,117 @@ local ExpectedTypeOfResults = {
 	CoordinateFrame = "table",
 	bool = "boolean",
 	Color3 = "vector",
-	Color3uint8 = "table"
-}
+	Color3uint8 = "table",
+	NumberRange = "table",
+	ProtectedString = "string",
+	UDim2 = "table",
+	Ray = "table",
+	Font = "table",
+	Rect2D = "table"
+} ]]
 
-local SuperclassesOfClass = { -- Hardcoded because of Severe's inconsistencies
-	Part = {"BasePart", "Instance"},
-	MeshPart = {"MeshPart", "BasePart", "Instance"},
-	UnionOperation = {"PartOperation", "BasePart", "Instance"},
-	NegateOperation = {"PartOperation", "Instance"}, -- TODO (requires reading all the BasePart properties with memory functions)
-	IntersectOperation = {"PartOperation", "Instance"}, -- TODO (requires reading all the BasePart properties with memory functions)
-	SpawnLocation = {"SpawnLocation", "BasePart", "Instance"},
-	CornerWedgePart = {"BasePart", "Instance"},
-	TrussPart = {"BasePart", "Instance"},
-	WedgePart = {"BasePart", "Instance"},
-	Tool = {"Tool", "Model", "Instance"},
-	BloomEffect = {"BloomEffect", "PostEffect", "Instance"},
-	BlurEffect = {"BlurEffect", "PostEffect", "Instance"},
-	ColorCorrectionEffect = {"ColorCorrectionEffect", "PostEffect", "Instance"},
-	ColorGradingEffect = {"ColorGradingEffect", "PostEffect", "Instance"},
-	DepthOfFieldEffect = {"DepthOfFieldEffect", "PostEffect", "Instance"},
-	SunRaysEffect = {"SunRaysEffect", "PostEffect", "Instance"},
-	DragDetector = {"DragDetector", "ClickDetector", "Instance"},
-	Shirt = {"Shirt", "Clothing", "Instance"}
-}
+local ApiDump = JSONDecode(game:HttpGet("https://raw.githubusercontent.com/MaximumADHD/Roblox-Client-Tracker/roblox/Mini-API-Dump.json"))
+
+local SuperclassList = {}
+local SuperclassesOfClass = {}
+
+for _, Class in ApiDump.Classes do
+	SuperclassList[Class.Name] = Class.Superclass
+end
+
+local function GetAllSuperclasses(Class)
+	local Superclasses = {}
+	local layer = Class
+	while layer ~= "Object" do
+		table.insert(Superclasses, layer)
+		layer = SuperclassList[layer]
+	end
+	return Superclasses
+end
 
 print("SaveInstance initialized")
 
-local function saveinstance(Options)
-	-- Options: ToSave (Instance or table), IsModel (bool), PrintInterval (int), FileName (string), DebugPrints (bool)
+local function saveinstance(CustomOptions)
+	-- Options: IsModel (bool), ToSave (Pointer, Instance, or table of pointers/instances), PrintInterval (int), FileName (string), DebugPrints (bool), Decompile (bool), SaveBytecode (bool), DecompileFunction (function)
 	
-	if not Options then
-		Options = {}
+	local Options = {
+		IsModel = nil, -- Whether the file is saved as a model (RBXM) file instead of a place style (bool)
+		ToSave = { -- These instances and their descendants are saved (pointer, instance, or a table of pointers/instances)
+			GetService("Workspace"),
+			GetService("Players"),
+			GetService("Lighting"),
+			GetService("MaterialService"),
+			GetService("ReplicatedFirst"),
+			GetService("ReplicatedStorage"),
+			GetService("StarterGui"),
+			GetService("StarterPack"),
+			GetService("StarterPlayer"),
+			GetService("Teams"),
+			GetService("SoundService"),
+			GetService("JointsService")
+		},
+		PrintInterval = 1000, -- Amount of instances between prints (int)
+		FileName = memory.readu64(DataModel, Offsets.DataModel.PlaceId), -- File name without extension (string)
+		DebugPrints = true, -- Debug prints about unusual scenarios (bool)
+		Decompile = false, -- Whether to decompile local and module scripts (bool)
+		SaveBytecode = false, -- Whether to include the base64-encoded bytecode of local and module scripts
+		DecompileFunction = function(Bytecode) -- Function used when decompiling scripts
+			local Body = crypt.json.encode({script = crypt.base64.encode(Bytecode)})
+			return game:HttpPost("https://api.lua.expert/decompile", Body, "application/json", "application/json")
+		end,
+		NotCreatableFixes = {Player = "Folder", PlayerGui = "Folder", PlayerScripts = "Folder", TouchTransmitter = "Folder"} -- Saves instances as different classes so they can appear in studio (table)
+	}
+	
+	if CustomOptions then
+		for Option, Value in CustomOptions do
+			Options[Option] = Value
+		end
 	end
+	
 	local IsModel = Options.IsModel
-	if not IsModel then
-		IsModel = true
-	end
 	local ToSave = Options.ToSave
-	if not ToSave then 
-		ToSave = {
-			game:GetService("Workspace"),
-			game:GetService("Players"),
-			game:GetService("Lighting"),
-			game:GetService("MaterialService"),
-			game:GetService("ReplicatedFirst"),
-			game:GetService("ReplicatedStorage"),
-			game:GetService("StarterGui"),
-			game:GetService("StarterPack"),
-			game:GetService("StarterPlayer"),
-			game:GetService("Teams"),
-			game:GetService("SoundService")
-		}
-		if IsModel == nil then
-			IsModel = false
+	local PrintInterval = Options.PrintInterval
+	local FileName = Options.FileName
+	local DebugPrints = Options.DebugPrints
+	local Decompile = Options.Decompile
+	local SaveBytecode = Options.SaveBytecode
+	local DecompileFunction = Options.DecompileFunction
+	local NotCreatableFixes = Options.NotCreatableFixes or {}
+	
+	if ToSave == game or ToSave == DataModel then
+		ToSave = GetChildren(DataModel)
+	end
+
+	if type(ToSave) == "table" then
+		for i, v in ToSave do
+			if typeof(v) == "Instance" then
+				ToSave[i] = tonumber(v.Data)
+			end
+			
+			if IsModel == nil and GetParent(v) ~= DataModel then
+				IsModel = true
+			end
 		end
 	end
-	local PrintInterval = Options.PrintInterval
-	if not PrintInterval then 
-		PrintInterval = 1000
-	end
-	local FileName = Options.FileName
-	if not FileName then 
-		FileName = tostring(game.PlaceId)
+	if type(ToSave) == "number" then
+		ToSave = {ToSave}
 	end
 	
-	if ToSave == game then
-		ToSave = game:GetChildren()
-		if IsModel == nil then
-			IsModel = false
-		end
-	end	
+	if typeof(ToSave) == "Instance" then
+		ToSave = {tonumber(ToSave.Data)}
+	end
 	
 	local StartingTime = os.clock()
 	local SavedInstancesCount = 0
 	local SavedInstancesUntilPrint = 0
 	local FileType
 	
-	if Options.IsModel then
+	if IsModel then
 		FileType = "rbxmx"
 	else
 		FileType = "rbxlx"
 	end
 	
-	if typeof(ToSave) == "Instance" then
-		ToSave = {ToSave}
-	end
-	
-	local DebugPrints = Options.DebugPrints
 	local FullFileName = FileName .. "." .. FileType .. ".txt" -- Severe only lets you write certain files extensions, rbxlx/rbxmx files aren't part of that list
 	local SerializedData = '<roblox version="4">' -- XML header
 	local CurrentSerializedData = ""
@@ -665,14 +1422,21 @@ local function saveinstance(Options)
 			--	end
 			--	continue
 			--end
+
+			if Instance == 0 then
+				continue
+			end
+			local ClassName = GetClassName(Instance)
+			local NotCreateableFix = NotCreatableFixes[ClassName]
+			local ClassNameOverride = NotCreateableFix or ClassName
 			
-			local ClassName = Instance.ClassName
-			local Referent = Instance.Data
-			InstanceData ..= '<Item class="' .. ClassName .. '" referent="' .. Referent .. '"><Properties>'
+			local InstanceStart = '<Item class="' .. ClassNameOverride .. '" referent="' .. Instance .. '"><Properties>'
+			InstanceData ..= InstanceStart
 			
 			local Superclasses = SuperclassesOfClass[ClassName]
 			if not Superclasses then
-				Superclasses = {ClassName, "Instance"}
+				Superclasses = GetAllSuperclasses(ClassName)
+				SuperclassesOfClass[ClassName] = Superclasses
 			end
 			
 			for _, Class in Superclasses do
@@ -685,34 +1449,34 @@ local function saveinstance(Options)
 					local ValueType = PropertyData[2]
 					local raw
 					
-					if PropertyMode == 1 then -- Index
-						raw = Instance[PropertyName]
-					elseif PropertyMode == 2 then -- PropertyFunction
-						raw = PropertyData[3](Instance)
-					elseif PropertyMode == 3 and Offsets then -- Memory
+					if PropertyMode == 1 then -- Memory
 						local ReadFunction = MemoryReadFunctions[ValueType]
 						local ReadClass = Class
 						local ReadInstance = Instance
 						local Namespace = PropertyData[5]
-						if Namespace and Offsets.Namespaces then
+						if Namespace then
 							ReadClass = Namespace
-							ReadInstance = memory.readu64(Instance, Offsets.Namespaces[Namespace])
+							ReadInstance = memory.readu64(Instance, Offsets[Class][Namespace])
 						end
 						
 						local ClassOffsets = Offsets[ReadClass]
 						Offset = ClassOffsets[PropertyName]
 						if Offset == nil then
 							if DebugPrints then
-								warn("Nil offset for " .. PropertyName .. " of class " .. class)
+								warn("Nil offset for " .. PropertyName .. " of class " .. Class)
 							end
 							continue
 						end
-						if not ReadFunction then
-							print(ValueType)
-						end
 						raw = ReadFunction(ReadInstance, Offset)
+					elseif PropertyMode == 2 then -- PropertyFunction
+						raw = PropertyData[3](Instance, PropertyName, Class)
+					elseif PropertyMode == 3 then -- Decompile
+						if Decompile or SaveBytecode then
+							raw = GetScriptSource(Instance, Decompile, SaveBytecode, DecompileFunction)
+						else
+							raw = "-- Decompiling is Disabled"
+						end
 					end
-					
 					local TypeOfResult = typeof(raw)
 					if ValueType == "string" and TypeOfResult == "Instance" then -- Severe returns empty strings of certain properies (EX: Name) as strings
 						raw = ""
@@ -720,37 +1484,31 @@ local function saveinstance(Options)
 					if raw == nil then
 						continue
 					end
-					
-					if TypeOfResult == ExpectedTypeOfResults[ValueType] then -- Empty strings are returned as instances for some reason, so this just checks that Severe returns the correct thing (this has been fixed but I'm keeping the code in case there are other errors like it)
-						local Formatted
-						local Descriptor = Descriptors[ValueType]
-						if Descriptor then
-							Formatted = Descriptor(raw)
-							InstanceData ..= "<" .. ValueType ..' name="' .. PropertyName .. '">' .. Formatted .. "</" .. ValueType .. ">"
-						elseif DebugPrints then
-							warn("No descriptor for type " .. ValueType)
-						end
-					elseif typeof(raw) ~= ExpectedTypeOfResults[ValueType] and DebugPrints then
-						warn("Typeof Result (" .. TypeOfResult .. ") did not match expected result for ValueType " .. ValueType .. ". Raw value: " .. tostring(raw) .. " Instance referent: " .. Referent)
+					local Formatted
+					local Descriptor = Descriptors[ValueType]
+					if Descriptor then
+						Formatted = Descriptor(raw)
+						InstanceData ..= "<" .. ValueType ..' name="' .. PropertyName .. '">' .. Formatted .. "</" .. ValueType .. ">"
+					elseif DebugPrints then
+						warn("No descriptor for type " .. ValueType)
 					end
 				end
 			end
-			
 			InstanceData ..= "</Properties>"
 			CurrentSerializedData ..= InstanceData
 			InstanceData = ""
 			SavedInstancesCount += 1
 			SavedInstancesUntilPrint += 1
 			if SavedInstancesUntilPrint == PrintInterval then
-				task.wait()
+				task.wait(0.7)
 				SerializedData ..= CurrentSerializedData
 				CurrentSerializedData = ""
 				SavedInstancesUntilPrint = 0
 				print("Instances Saved: " .. SavedInstancesCount)
 			end
 			
-			local Children = Instance:GetChildren()
-			if #Children ~= 0 then
+			local Children = GetChildren(Instance)
+			if Children then
 				SerializeInstances(Children)
 			end
 			CurrentSerializedData ..= "</Item>"
@@ -760,6 +1518,7 @@ local function saveinstance(Options)
 	
 	SerializeInstances(ToSave)
 	SerializedData ..= CurrentSerializedData
+	SerializedData ..= '<Item class="Script" referent="1"><Properties><string name="Name">README</string><ProtectedString name="Source">--[[\nSaved using: https://github.com/Devraj2010isme/SevereSaveinstance\nGameId: ' .. memory.readu64(DataModel, Offsets.DataModel.GameId) .. "\nPlaceId: " .. memory.readu64(DataModel, Offsets.DataModel.PlaceId) .. "\nPlaceVersion: " .. memory.readu32(DataModel, Offsets.DataModel.PlaceVersion) .. "\nOptions used when saving: " .. crypt.json.encode(Options) .. "\n]]</ProtectedString></Properties></Item>"
 	SerializedData ..= "</roblox>"
 	
 	print("Writing to file...")
