@@ -3,10 +3,10 @@
     "Roblox Version": "version-2c6fd5e09aaf4cfa",
     "Dumper Version": "2.2.5",
     "Dumped With": "RbxDumperV2",
-    "Dumped At": "15:30 25/11/2026",
+    "Dumped At": "18:21 27/11/2026",
     "Source Code": "https://git.imtheo.lol/theo/RbxDumperV2",
     "Discord": "https://offsets.imtheo.lol/discord",
-    "Total Offsets": 723,
+    "Total Offsets": 887,
     "Offsets": {
         "TaskScheduler": {
             "Pointer": 148528536,
@@ -58,7 +58,9 @@
             "Parent": 96,
             "ClassDescriptor": 24,
             "ClassName": 8,
-            "ClassBase": 440
+            "ClassBase": 440,
+            "Capabilities": 56,
+            "Sandboxed": 146
         },
         "NameContainer": {
             "Name": 0
@@ -88,10 +90,10 @@
             "ToRenderView1": 472,
             "ToRenderView2": 8,
             "ToRenderView3": 40,
-            "PrimitiveCount": 305
+            "PrimitiveCount": 1072
         },
         "RunService": {
-            "HeartbeatTask": 504,
+            "HeartbeatTask": 784,
             "HeartbeatFPS": 220
         },
         "RenderJob": {
@@ -148,6 +150,12 @@
             "Snow": 30,
             "WoodPlanks": 21
         },
+        "Clouds": {
+            "Color": 152,
+            "Cover": 164,
+            "Density": 168,
+            "Enabled": 172
+        },
         "Sound": {
             "SoundId": 176,
             "RollOffMaxDistance": 256,
@@ -164,17 +172,6 @@
             "Neutral": 474,
             "ForcefieldDuration": 464,
             "TeamColor": 468
-        },
-        "SurfaceAppearance": {
-            "AlphaMode": 472,
-            "Color": 448,
-            "ColorMap": 176,
-            "EmissiveMaskContent": 224,
-            "EmissiveStrength": 476,
-            "EmissiveTint": 460,
-            "MetalnessMap": 272,
-            "NormalMap": 320,
-            "RoughnessMap": 368
         },
         "ParticleEmitter": {
             "Brightness": 516,
@@ -206,7 +203,22 @@
             "CurveSize0": 364,
             "CurveSize1": 368,
             "Width0": 400,
-            "Width1": 404
+            "Width1": 404,
+            "Enabled": 412,
+            "FaceCamera": 413,
+            "Segments": 384,
+            "TextureMode": 392,
+            "Transparency": 160,
+            "Color": 224
+        },
+        "Fire": {
+            "Color": 160,
+            "Enabled": 200,
+            "Heat": 192,
+            "LocalTransparencyModifier": 184,
+            "Size": 196,
+            "SecondaryColor": 172,
+            "TimeScale": 188
         },
         "Player": {
             "LocalPlayer": 280,
@@ -284,7 +296,7 @@
             "HeadsUpDisplay": 549
         },
         "StatsItem": {
-            "Value": 7252
+            "Value": 10712
         },
         "Tool": {
             "Tooltip": 1104,
@@ -317,6 +329,20 @@
         },
         "Skin": {
             "SkinColor": 168
+        },
+        "BodyColors": {
+            "HeadColor3": 172,
+            "LeftArmColor3": 188,
+            "LeftLegColor3": 204,
+            "RightArmColor3": 220,
+            "RightLegColor3": 236,
+            "TorsoColor3": 252
+        },
+        "Accoutrement": {
+            "AttachmentPoint": 160
+        },
+        "Accessory": {
+            "AccessoryType": 352
         },
         "CharacterMesh": {
             "BaseTextureId": 176,
@@ -447,7 +473,8 @@
             "Bulge": 208
         },
         "Attachment": {
-            "Position": 172
+            "Position": 172,
+            "Visible": 196
         },
         "JointInstance": {
             "Part0": 256,
@@ -801,12 +828,141 @@
         "WindowInputState": {
             "CapsLock": 18446744073709551608
         },
+        "UIBlur": {
+            "Color": 176,
+            "Enabled": 196,
+            "Strength": 188,
+            "Transparency": 192
+        },
+        "UIAspectRatioConstraint": {
+            "AspectRatio": 184,
+            "AspectType": 188,
+            "DominantAxis": 192
+        },
+        "UISizeConstraint": {
+            "MinSize": 192,
+            "MaxSize": 184
+        },
+        "UITextSizeConstraint": {
+            "MinTextSize": 180,
+            "MaxTextSize": 176
+        },
+        "UICorner": {
+            "BottomLeftRadius": 184,
+            "BottomRightRadius": 192,
+            "TopLeftRadius": 200,
+            "TopRightRadius": 208
+        },
+        "UIDragDetector": {
+            "ActivatedCursorIcon": 200,
+            "BoundingBehavior": 408,
+            "BoundingUI": 280,
+            "CursorIcon": 248,
+            "DragAxis": 400,
+            "DragRelativity": 412,
+            "DragRotation": 416,
+            "DragSpace": 420,
+            "DragStyle": 424,
+            "DragUDim2": 336,
+            "Enabled": 448,
+            "MinDragAngle": 432,
+            "MaxDragAngle": 428,
+            "MinDragTranslation": 368,
+            "MaxDragTranslation": 352,
+            "ReferenceUIInstance": 296,
+            "ResponseStyle": 436,
+            "Selectable": 449,
+            "SelectionModeDragSpeed": 384,
+            "SelectionModeRotateSpeed": 440,
+            "UIDragSpeedAxisMapping": 444
+        },
+        "UIFlexItem": {
+            "FlexMode": 176,
+            "GrowRatio": 180,
+            "ItemLineAlignment": 184,
+            "ShrinkRatio": 188
+        },
+        "UIGradient": {
+            "Color": 240,
+            "Enabled": 320,
+            "Offset": 296,
+            "Rotation": 304,
+            "Scale": 308,
+            "TileMode": 312,
+            "Transparency": 176,
+            "Type": 316
+        },
+        "UIGridStyleLayout": {
+            "FillDirection": 240,
+            "HorizontalAlignment": 244,
+            "SortOrder": 248,
+            "VerticalAlignment": 252
+        },
+        "UIGridLayout": {
+            "CellPadding": 328,
+            "CellSize": 344,
+            "FillDirectionMaxCells": 376,
+            "StartCorner": 380
+        },
+        "UIListLayout": {
+            "HorizontalFlex": 344,
+            "ItemLineAlignment": 348,
+            "Padding": 328,
+            "VerticalFlex": 352,
+            "Wraps": 356
+        },
+        "UIPageLayout": {
+            "Animated": 356,
+            "Circular": 357,
+            "EasingDirection": 344,
+            "EasingStyle": 348,
+            "GamepadInputEnabled": 358,
+            "Padding": 336,
+            "ScrollWheelInputEnabled": 359,
+            "TouchInputEnabled": 360,
+            "TweenTime": 352
+        },
+        "UITableLayout": {
+            "FillEmptySpaceColumns": 348,
+            "FillEmptySpaceRows": 349,
+            "MajorAxis": 344,
+            "Padding": 328
+        },
+        "UIPadding": {
+            "PaddingBottom": 176,
+            "PaddingLeft": 184,
+            "PaddingRight": 192,
+            "PaddingTop": 200
+        },
+        "UIScale": {
+            "Scale": 176
+        },
+        "UIShadow": {
+            "BlurRadius": 220,
+            "Color": 208,
+            "Enabled": 240,
+            "Inset": 241,
+            "Mode": 228,
+            "Offset": 176,
+            "ShowBehindParent": 242,
+            "Spread": 192,
+            "Transparency": 232,
+            "ZIndex": 236
+        },
+        "UIStroke": {
+            "ApplyStrokeMode": 204,
+            "BorderOffset": 196,
+            "BorderStrokePosition": 208,
+            "Color": 184,
+            "Enabled": 232,
+            "LineJoinMode": 212,
+            "StrokeSizingMode": 216,
+            "Thickness": 220,
+            "Transparency": 224,
+            "ZIndex": 228
+        },
         "Message": {
             "Text": 160
-        },
-        "Textures": {
-            "Decal_Texture": 456,
-            "Texture_Texture": 456
         },
         "Lighting": {
             "ClockTime": 176,
@@ -891,6 +1047,25 @@
             "Size": 160,
             "Enabled": 152
         },
+        "Light": {
+            "Brightness": 180,
+            "Color": 168,
+            "Enabled": 184,
+            "Shadows": 185
+        },
+        "PointLight": {
+            "Range": 192
+        },
+        "SpotLight": {
+            "Angle": 192,
+            "Face": 196,
+            "Range": 200
+        },
+        "SurfaceLight": {
+            "Angle": 192,
+            "Face": 196,
+            "Range": 200
+        },
         "ProximityPrompt": {
             "ActionText": 152,
             "ObjectText": 184,
@@ -928,6 +1103,49 @@
             "DragStyle": 612,
             "TrackballRadialPullFactor": 656,
             "TrackballRollFactor": 652
+        },
+        "SurfaceAppearance": {
+            "AlphaMode": 472,
+            "Color": 448,
+            "ColorMap": 176,
+            "EmissiveMaskContent": 224,
+            "EmissiveStrength": 476,
+            "EmissiveTint": 460,
+            "MetalnessMap": 272,
+            "NormalMap": 320,
+            "RoughnessMap": 368,
+            "TexturePack": 416,
+            "ResampleMode": 480,
+            "SurfaceSlot": 484
+        },
+        "FaceInstance": {
+            "Face": 184
+        },
+        "Decal": {
+            "AutoLocalize": 640,
+            "Color3": 568,
+            "Texture": 456,
+            "EmissiveMaskContent": 216,
+            "EmissiveStrength": 608,
+            "EmissiveTint": 580,
+            "LocalTransparencyModifier": 612,
+            "MetalnessMap": 312,
+            "NormalMap": 360,
+            "ResampleMode": 616,
+            "Rotation": 620,
+            "RoughnessMap": 408,
+            "TexturePack": 504,
+            "TexturePackMetadata": 536,
+            "Transparency": 632,
+            "UVOffset": 592,
+            "UVScale": 600,
+            "ZIndex": 636
+        },
+        "Texture": {
+            "OffsetStudsU": 720,
+            "OffsetStudsV": 724,
+            "StudsPerTileU": 728,
+            "StudsPerTileV": 732
         },
         "AnimationTrack": {
             "Animation": 160,
@@ -970,10 +1188,10 @@
         "LRUNode": {
             "Next": 0,
             "AssetID": 16,
-            "CachedItem": 64
+            "CachedItem": 56
         },
         "CachedItem": {
-            "FileMeshData": 64
+            "FileMeshData": 40
         },
         "FileMeshData": {
             "AABBMin": 384,

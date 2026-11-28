@@ -12,6 +12,9 @@ saveinstance(options)
 - Decompile: `boolean`
   - Whether to decompile local and module scripts
   - Default: true
+- DecompileIgnore `{Instance | Pointer}`
+  - Table of scripts that will not be decompiled (also applies to descendants)
+  - Default: {}
 - SaveBytecode: `boolean`
   - Whether to include the base64-encoded bytecode of local and module scripts
   - Default: false
@@ -19,7 +22,7 @@ saveinstance(options)
   - The function used when decompiling scripts
   - Default: A function that uses the lua.expert api
 - ToSave: `Instance | Pointer | {Instance | Pointer}`
-  - Table of instances that will be saved
+  - Instance(s) that will be saved
   - Default: A table of common services (see source code)
 - ReadMe: `bool`
   - Whether to include a README script which contains the GameId, PlaceId, and place version

@@ -5,7 +5,7 @@ local PropList = { -- PropList from SevereSaveintanceXML.luau
 
 }
 
-local Theo_Offsets = JSONDecode(game:HttpGet("https://raw.githubusercontent.com/Devraj2010isme/SevereSaveinstance/refs/heads/main/Offsets/TheoOffsets/" .. Version .. ".json")).Offsets
+local Theo_Offsets = JSONDecode(readfile("TheoTemp.json")).Offsets -- JSONDecode(game:HttpGet("https://raw.githubusercontent.com/Devraj2010isme/SevereSaveinstance/refs/heads/main/Offsets/TheoOffsets/" .. Version .. ".json")).Offsets
 local Offsets = {}
 
 local function GetOffset(ClassName, PropertyName)
@@ -14,11 +14,7 @@ local function GetOffset(ClassName, PropertyName)
 		return
 	end
 	local Offset = OffsetsOfClass[PropertyName]
-	if Offset then
-		return Offset
-	else
-		return
-	end
+	return Offset
 end
 
 for ClassName, Properties in PropList do -- Theo's Offsets then Jonah's Offsets
@@ -56,7 +52,7 @@ Offsets.FakeDataModel = Theo_Offsets.FakeDataModel
 Offsets.DataModel = Theo_Offsets.DataModel
 
 Offsets.Tool.Grip = Theo_Offsets.Tool.Grip - 36 -- Correct offset (Theo's "Grip" offset is actually the GripPos offset)
---Offsets.Attachment.Position = Theo_Offsets.Attachment.Position
+Offsets.Attachment.Position = Theo_Offsets.Attachment.Position
 Offsets.CharacterMesh.BaseTextureId = Theo_Offsets.CharacterMesh.BaseTextureId
 Offsets.CharacterMesh.MeshId = Theo_Offsets.CharacterMesh.MeshId
 Offsets.CharacterMesh.OverlayTextureId = Theo_Offsets.CharacterMesh.OverlayTextureId
@@ -65,6 +61,7 @@ Offsets.Camera.FieldOfView = Theo_Offsets.Camera.FieldOfView
 Offsets.ViewportFrame.CameraFieldOfView = Theo_Offsets.ViewportFrame.CameraFieldOfView
 Offsets.Lighting.ClockTime = Theo_Offsets.Lighting.ClockTime
 Offsets.Terrain.MaterialColors = Theo_Offsets.Terrain.MaterialColors
+Offsets.Instance.DefinesCapabilities = Theo_Offsets.Instance.Sandboxed
 
 Offsets.Instance.ChildrenStart = Theo_Offsets.Instance.ChildrenStart
 Offsets.Instance.ClassDescriptor = Theo_Offsets.Instance.ClassDescriptor
@@ -86,7 +83,7 @@ Offsets.ModuleScript.Bytecode = Theo_Offsets.ModuleScript.ByteCode
 
 writefile("Offsets.json", JSONEncode(Offsets))
 
---[[ Execute this prior to dumping Theo's offsets (my modification of Theo's offsets, https://github.com/Devraj2010isme/RbxDumperV2):
+--[[ Execute this prior to dumping Theo offsets:
 sethiddenproperty(game.StarterGui.TextLabel, "LocalizationMatchIdentifier", "LocalizationMatchIdentifier_Value")
 sethiddenproperty(game.StarterGui.TextLabel, "LocalizationMatchedSourceText", "LocalizationMatchedSourceText_Value")
 sethiddenproperty(game.StarterGui.TextButton, "LocalizationMatchIdentifier", "LocalizationMatchIdentifier_Value")

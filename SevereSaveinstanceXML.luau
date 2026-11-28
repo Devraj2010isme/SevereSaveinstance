@@ -125,10 +125,18 @@ local MemoryReadFunctions = {
 	Vector2 = memory.readvector,
 	CoordinateFrame = function(Data, Offset)
 		local CFrame = {}
-		CFrame.RightVector = memory.readvector(Data, Offset)
-		CFrame.UpVector = memory.readvector(Data, Offset + 12)
-		CFrame.LookVector = memory.readvector(Data, Offset + 24)
-		CFrame.Position = memory.readvector(Data, Offset + 36)
+		CFrame.R00 = memory.readf32(Data, Offset)
+		CFrame.R01 = memory.readf32(Data, Offset + 4)
+		CFrame.R02 = memory.readf32(Data, Offset + 8)
+		CFrame.R10 = memory.readf32(Data, Offset + 12)
+		CFrame.R11 = memory.readf32(Data, Offset + 16)
+		CFrame.R12 = memory.readf32(Data, Offset + 20)
+		CFrame.R20 = memory.readf32(Data, Offset + 24)
+		CFrame.R21 = memory.readf32(Data, Offset + 28)
+		CFrame.R22 = memory.readf32(Data, Offset + 32)
+		CFrame.X = memory.readf32(Data, Offset + 36)
+		CFrame.Y = memory.readf32(Data, Offset + 40)
+		CFrame.Z = memory.readf32(Data, Offset + 44)
 		return CFrame
 	end,
 	Color3uint8 = function(Data, Offset)
@@ -146,6 +154,27 @@ local MemoryReadFunctions = {
 	end,
 	NumberRange = function(Data, Offset)
 		return {memory.readf32(Data, Offset), memory.readf32(Data, Offset + 4)}
+	end,
+	NumberSequence = function(Data, Offset)
+		local NumberSequenceHolder = memory.readu64(Data, Offset)
+		local NumberSequence = {}
+		
+		for i = 0, memory.readu32(Data, Offset + 8) * 3 - 1 do
+			table.insert(NumberSequence, memory.readf32(NumberSequenceHolder, i * 4))
+		end
+		return NumberSequence
+	end,
+	ColorSequence = function(Data, Offset)
+		local ColorSequenceHolder = memory.readu64(Data, Offset)
+		local ColorSequence = {}
+		
+		for i = 0, memory.readu32(Data, Offset + 8) * 5 - 1 do
+			table.insert(ColorSequence, memory.readf32(ColorSequenceHolder, i * 4))
+		end
+		return ColorSequence
+	end,
+	UDim = function(Data, Offset)
+		return {memory.readf32(Data, Offset), memory.readi32(Data, Offset + 4)}
 	end,
 	UDim2 = function(Data, Offset)
 		local UDim2 = {}
@@ -177,6 +206,19 @@ local MemoryReadFunctions = {
 		Rect.MaxX = memory.readf32(Data, Offset + 8) 
 		Rect.MaxY = memory.readf32(Data, Offset + 12)
 		return Rect
+	end,
+	SecurityCapabilities = function(Data, Offset)
+		local SecurityCapabilitiesHolder = memory.readu64(Data, Offset)
+		if SecurityCapabilitiesHolder == 0 then
+			return 0
+		end
+		local SecurityCapabilitiesHolder2 = memory.readu64(SecurityCapabilitiesHolder, 8)
+		
+		if memory.readu64(SecurityCapabilitiesHolder2 - 8) == 12 then
+			return memory.readu64(SecurityCapabilitiesHolder2 - 16)
+		else
+			return 0
+		end
 	end
 }
 
@@ -184,7 +226,9 @@ local PrimitiveOffset = Offsets.BasePart.Primitive
 local PrimitiveFlagsOffset = Offsets.Primitive.Flags
 local MaterialOffset = Offsets.Primitive.Material
 local RootPriorityOffset = Offsets.Primitive.RootPriority
+local AttachmentPositionOffset = Offsets.Attachment.Position
 local RunContextOffset = Offsets.BaseScript.RunContext
+local DefinesCapabilitiesOffset = Offsets.Instance.DefinesCapabilities
 
 local function ReadPrimitiveFlag(inst, PropertyName)
 	local Prim = memory.readu64(inst, PrimitiveOffset)
@@ -213,7 +257,7 @@ end
 
 local function RadiansToDegrees(inst, PropertyName, Class)
 	local Offset = Offsets[Class][PropertyName]
-	return memory.readf32(inst, Offset) * 180/math.pi
+	return math.deg(memory.readf32(inst, Offset))
 end
 
 local PropList = { -- Hardcoded because Severe can only read certain arbitrary properties 
@@ -243,7 +287,7 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 				local InstanceUserdata = pointer_to_userdata(inst)
 				local Success, Attributes = pcall(function() return InstanceUserdata:GetAttributes() end) -- GetAttributes sometimes fails with the message "invalid string position"
 				
-				if not Success or not next(Attributes) then
+				if not Success or not Attributes or not next(Attributes) then
 					return ""
 				end
 				
@@ -275,7 +319,17 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 				return buffer.tostring(b)
 			end
 		},
-		Name = {1, "string", nil, nil, "NameContainer"}
+		Name = {1, "string", nil, nil, "NameContainer"},
+		Capabilities = {1, "SecurityCapabilities"},
+		DefinesCapabilities = {
+			2, "bool",
+			function(inst)
+				return memory.readu8(inst, DefinesCapabilitiesOffset) > 10
+				-- If the value is 8 when DefinesCapabilities is false (most instances), the value is 24 when it's true
+				-- If the value is 0 when DefinesCapabilities is false, the value is 16 when it's true
+				-- If the value is 9 when DefinesCapabilities (workspace.Terrain), the value is 25 when it's true
+			end,
+		}
 	},
 	Workspace = {
 		CurrentCamera = {1, "ref"},
@@ -371,6 +425,25 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 		StarCount = {1, "int"},
 		CelestialBodiesShown = {1, "bool"}
 	},
+	Light = {
+		Brightness = {1, "float"},
+		Color = {1, "Color3"},
+		Enabled = {1, "bool"},
+		Shadows = {1, "bool"}
+	},
+	PointLight = {
+		Range = {1, "float"}
+	},
+	SpotLight = {
+		Angle = {1, "float"},
+		Face = {1, "token"},
+		Range = {1, "float"}
+	},
+	SurfaceLight = {
+		Angle = {1, "float"},
+		Face = {1, "token"},
+		Range = {1, "float"}
+	},
 	DataModelMesh = {
 		Scale = {1, "Vector3"},
 		Offset = {1, "Vector3"},
@@ -406,6 +479,12 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 			end
 		}
 	},
+	Clouds = {
+		Color = {1, "Color3"},
+		Cover = {1, "float"},
+		Density = {1, "float"},
+		Enabled = {1, "bool"}
+	},
 	BackpackItem = {
 		TextureId = {1, "ContentId", nil, "Tool"},
 	},
@@ -437,7 +516,10 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 		MetalnessMap = {1, "ContentId"},
 		NormalMap = {1, "ContentId"},
 		RoughnessMap = {1, "ContentId"},
-		EmissiveMaskContent = {1, "Content"}
+		EmissiveMaskContent = {1, "Content"},
+		TexturePack = {1, "ContentId"},
+		ResampleMode = {1, "token"},
+		SurfaceSlot = {1, "int"}
 	},
 	ParticleEmitter = {
 		Brightness = {1, "float"},
@@ -456,6 +538,15 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 		RotSpeed = {1, "NumberRange"},
 		Speed = {1, "NumberRange"}
 	},
+	Fire = {
+		Color = {1, "Color3"},
+		Enabled = {1, "bool"},
+		heat_xml = {1, "float", "Heat"},
+		LocalTransparencyModifier = {1, "float"},
+		size_xml = {1, "float", "Size"},
+		SecondaryColor = {1, "Color3"},
+		TimeScale = {1, "float"},
+	},
 	Beam = {
 		Brightness = {1, "float"},
 		LightEmission = {1, "float"},
@@ -470,6 +561,20 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 		CurveSize1 = {1, "float"},
 		Width0 = {1, "float"},
 		Width1 = {1, "float"},
+		Enabled = {1, "bool"},
+		FaceCamera = {1, "bool"},
+		Segments = {1, "int"},
+		TextureMode = {1, "token"},
+		Transparency = {1, "NumberSequence"},
+		Color = {1, "ColorSequence"}
+	},
+	BodyColors = {
+		HeadColor3 = {1, "Color3"},
+		LeftArmColor3 = {1, "Color3"},
+		LeftLegColor3 = {1, "Color3"},
+		RightArmColor3 = {1, "Color3"},
+		RightLegColor3 = {1, "Color3"},
+		TorsoColor3 = {1, "Color3"}
 	},
 	Clothing = {
 		Color3 = {1, "Color3"}
@@ -487,25 +592,43 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 	Skin = {
 		SkinColor = {1, "BrickColor"}
 	},
+	Accoutrement = {
+		AttachmentPoint = {1, "CoordinateFrame"}
+	},
+	Accessory = {
+		AccessoryType = {1, "token"}
+	},
 	LocalizationTable = {
 		SourceLocaleId = {1, "string"}
 	},
-	--Attachment = {
-	--	CFrame = { -- Component order is strange
-	--		2, "CoordinateFrame",
-	--		function(inst)
-	--			if Offsets and Offsets.Attachment.Position then
-	--				local Offset = Offsets.Attachment.Position 
-	--				local CFrame = {}
-	--				
-	--				CFrame.RightVector = memory.readvector(Data, Offset - 12)
-	--				CFrame.Position = memory.readvector(Data, Offset)
-	--				CFrame.UpVector = memory.readvector(Data, Offset + 12)
-	--				CFrame.LookVector = Vector3.new(0,0,0) -- TODO find LookVector
-	--			end
-	--		end
-	--	}
-	--},
+	Attachment = {
+		CFrame = { -- Not stored like other CFrames
+			2, "CoordinateFrame",
+			function(inst)
+				local CFrame = {}
+				
+				CFrame.R00 = memory.readf32(inst, AttachmentPositionOffset - 12)
+				CFrame.R01 = memory.readf32(inst, AttachmentPositionOffset + 12)
+				CFrame.R10 = memory.readf32(inst, AttachmentPositionOffset - 8)
+				CFrame.R11 = memory.readf32(inst, AttachmentPositionOffset + 16)
+				CFrame.R20 = memory.readf32(inst, AttachmentPositionOffset - 4)
+				CFrame.R21 = memory.readf32(inst, AttachmentPositionOffset + 20)
+				
+				-- Only 6 components are stored, so the other 3 have to be recreated
+				CFrame.R02 = (CFrame.R10 * CFrame.R21) - (CFrame.R11 * CFrame.R20)
+				CFrame.R12 = (CFrame.R20 * CFrame.R01) - (CFrame.R21 * CFrame.R00)
+				CFrame.R22 = (CFrame.R00 * CFrame.R11) - (CFrame.R01 * CFrame.R10)
+				
+				CFrame.X = memory.readf32(inst, AttachmentPositionOffset)
+				CFrame.Y = memory.readf32(inst, AttachmentPositionOffset + 4)
+				CFrame.Z = memory.readf32(inst, AttachmentPositionOffset + 8)
+				
+				return CFrame
+				-- The previous CFrame is stored normally at offset 248 (version-2c6fd5e09aaf4cfa)
+			end
+		},
+		Visible = {1, "bool"}
+	},
 	WeldConstraint = {
 		Part0Internal = {1, "ref", "Part0"},
 		Part1Internal = {1, "ref", "Part1"},
@@ -548,8 +671,34 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 	PartOperation = {
 		AssetId = {1, "ContentId", nil, "UnionOperation"}
 	},
+	FaceInstance = {
+		Face = {1, "token"}
+	},
 	Decal = {
-		Texture = {1, "ContentId", "Decal_Texture", "Textures"}		
+		AutoLocalize = {1, "bool"},
+		Color3 = {1, "Color3"},
+		Texture = {1, "ContentId"},
+		EmissiveMaskContent = {1, "Content"},
+		EmissiveStrength = {1, "float"},
+		EmissiveTint = {1, "Color3"},
+		LocalTransparencyModifier = {1, "float"},
+		MetalnessMap = {1, "ContentId"},
+		NormalMap = {1, "ContentId"},
+		ResampleMode = {1, "token"},
+		Rotation = {1, "float"},
+		RoughnessMap = {1, "ContentId"},
+		TexturePack = {1, "ContentId"},
+		TexturePackMetadata = {1, "string"},
+		Transparency = {1, "float"},
+		UVOffset = {1, "Vector2"},
+		UVScale = {1, "Vector2"},
+		ZIndex = {1, "int"}
+	},
+	Texture = {
+		OffsetStudsU = {1, "float"},
+		OffsetStudsV = {1, "float"},
+		StudsPerTileU = {1, "float"},
+		StudsPerTileV = {1, "float"}
 	},
 	LuaSourceContainer = {
 		ScriptGuid = {1, "string", "GUID", "Script"},
@@ -835,6 +984,139 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 	TextChannel = {
 		AddPlayersOnJoin = {1, "bool"}
 	},
+	UIBlur = {
+		Color = {1, "Color3"},
+		Enabled = {1, "bool"},
+		Strength = {1, "token"},
+		Transparency = {1, "float"}
+	},
+	UIAspectRatioConstraint = {
+		AspectRatio = {1, "float"},
+		AspectType = {1, "token"},
+		DominantAxis = {1, "token"}
+	},
+	UISizeConstraint = {
+		MinSize = {1, "Vector2"},
+		MaxSize = {1, "Vector2"}
+	},
+	UITextSizeConstraint = {
+		MinTextSize = {1, "int"},
+		MaxTextSize = {1, "int"}
+	},
+	UICorner = {
+		BottomLeftRadius = {1, "UDim"},
+		BottomRightRadius = {1, "UDim"},
+		TopLeftRadius = {1, "UDim"},
+		TopRightRadius = {1, "UDim"}
+	},
+	UIDragDetector = {
+		ActivatedCursorIcon = {1, "ContentId"},
+		BoundingBehavior = {1, "token"},
+		BoundingUI = {1, "ref"},
+		CursorIcon = {1, "ContentId"},
+		DragAxis = {1, "Vector2"},
+		DragRelativity = {1, "token"},
+		DragRotation = {1, "float"},
+		DragSpace = {1, "token"},
+		DragStyle = {1, "token"},
+		DragUDim2 = {1, "UDim2"},
+		Enabled = {1, "bool"},
+		MinDragAngle = {1, "float"},
+		MaxDragAngle = {1, "float"},
+		MinDragTranslation = {1, "UDim2"},
+		MaxDragTranslation = {1, "UDim2"},
+		ReferenceUIInstance = {1, "ref"},
+		ResponseStyle = {1, "token"},
+		Selectable = {1, "bool"},
+		SelectionModeDragSpeed = {1, "UDim2"},
+		SelectionModeRotateSpeed = {1, "float"},
+		UIDragSpeedAxisMapping = {1, "token"}
+	},
+	UIFlexItem = {
+		FlexMode = {1, "token"},
+		GrowRatio = {1, "float"},
+		ItemLineAlignment = {1, "token"},
+		ShrinkRatio = {1, "float"}
+	},
+	UIGradient = {
+		Color = {1, "ColorSequence"},
+		Enabled = {1, "bool"},
+		Offset = {1, "Vector2"},
+		Rotation = {1, "float"},
+		Scale = {1, "float"},
+		TileMode = {1, "token"},
+		Transparency = {1, "NumberSequence"},
+		Type = {1, "token"}
+	},
+	UIGridStyleLayout = {
+		FillDirection = {1, "token"},
+		HorizontalAlignment = {1, "token"},
+		SortOrder = {1, "token"},
+		VerticalAlignment = {1, "token"}
+	},
+	UIGridLayout = {
+		CellPadding = {1, "UDim2"},
+		CellSize = {1, "UDim2"},
+		FillDirectionMaxCells = {1, "int"},
+		StartCorner = {1, "token"}
+	},
+	UIListLayout = {
+		HorizontalFlex = {1, "token"},
+		ItemLineAlignment = {1, "token"},
+		Padding = {1, "UDim"},
+		VerticalFlex = {1, "token"},
+		Wraps = {1, "bool"}
+	},
+	UIPageLayout = {
+		Animated = {1, "bool"},
+		Circular = {1, "bool"},
+		EasingDirection = {1, "token"},
+		EasingStyle = {1, "token"},
+		GamepadInputEnabled = {1, "bool"},
+		Padding = {1, "UDim"},
+		ScrollWheelInputEnabled = {1, "bool"},
+		TouchInputEnabled = {1, "bool"},
+		TweenTime = {1, "float"}
+	},
+	UITableLayout = {
+		FillEmptySpaceColumns = {1, "bool"},
+		FillEmptySpaceRows = {1, "bool"},
+		MajorAxis = {1, "token"},
+		Padding = {1, "UDim2"}
+	},
+	UIPadding = {
+		PaddingBottom = {1, "UDim"},
+		PaddingLeft = {1, "UDim"},
+		PaddingRight = {1, "UDim"},
+		PaddingTop = {1, "UDim"}
+	},
+	UIScale = {
+		Scale = {1, "float"}
+	},
+	UIShadow = {
+		BlurRadius = {1, "UDim"},
+		Color = {1, "Color3"},
+		Enabled = {1, "bool"},
+		Inset = {1, "bool"},
+		Mode = {1, "token"},
+		Offset = {1, "UDim2"},
+		ShowBehindParent = {1, "bool"},
+		Spread = {1, "float"},
+		Transparency = {1, "float"},
+		ZIndex = {1, "int"}
+	},
+	UIStroke = {
+		ApplyStrokeMode = {1, "token"},
+		BorderOffset = {1, "UDim"},
+		BorderStrokePosition = {1, "token"},
+		Color = {1, "Color3"},
+		Enabled = {1, "bool"},
+		LineJoinMode = {1, "token"},
+		StrokeSizingMode = {1, "token"},
+		Thickness = {1, "float"},
+		Transparency = {1, "float"},
+		ZIndex = {1, "int"},
+	},
 	Message = {
 		Text = {1, "string"}
 	},
@@ -901,6 +1183,7 @@ local PropList = { -- Hardcoded because Severe can only read certain arbitrary p
 		TopParamB = {1, "float"},
 		TopSurface = {1, "token"},
 		TopSurfaceInput = {1, "token"}
+		-- TODO CollisionGroup, CollisionGroupId, CustomPhysicalProperties, MaterialVariantSerialized, PivotOffset
 	},
 	Part = {
 		shape = {1, "token", "Shape", "BasePart"},
@@ -1136,12 +1419,18 @@ local function DecompressBytecode(OriginalData)
 	return ZSTDDecompress(CompressedData)
 end
 
+local ScriptsToIgnore = {}
+
 local function GetScriptSource(Instance, Decompile, SaveBytecode, DecompileFunction)
+	if not Decompile and not SaveBytecode then
+		return "-- Decompiling is Disabled"
+	end
+	if ScriptsToIgnore[Instance] then
+		return "-- Ignored"
+	end
+	
 	local ClassName = GetClassName(Instance)
 	local BytecodeOffset = Offsets[ClassName].Bytecode
-	if not BytecodeOffset then
-		return "Failed to get bytecode: unable to find bytecode offset"
-	end
 	
 	if ClassName == "Script" and memory.readi32(Instance, RunContextOffset) ~= 2 then
 		return "-- [FilteringEnabled] Server Scripts are IMPOSSIBLE to save"
@@ -1174,6 +1463,8 @@ local function GetScriptSource(Instance, Decompile, SaveBytecode, DecompileFunct
 			ScriptCache[Bytecode] = DecompiledScript
 		end
 		Source ..= DecompiledScript
+	else
+		Source ..= "-- Decompiling is Disabled"
 	end
 	
 	return Source
@@ -1234,7 +1525,7 @@ Descriptors = {
 		return raw == 0 and "null" or raw
 	end,
 	CoordinateFrame = function(raw) -- CFrame
-		return "<X>" .. raw.Position.X .. "</X><Y>" .. raw.Position.Y .. "</Y><Z>" .. raw.Position.Z .. "</Z><R00>".. raw.RightVector.X .. "</R00><R01>" .. raw.RightVector.Y .. "</R01><R02>" .. raw.RightVector.Z .. "</R02><R10>" .. raw.UpVector.X .. "</R10><R11>" .. raw.UpVector.Y .. "</R11><R12>" .. raw.UpVector.Z .. "</R12><R20>" .. raw.LookVector.X .. "</R20><R21>" .. raw.LookVector.Y .. "</R21><R22>" .. raw.LookVector.Z .. "</R22>"
+		return "<X>" .. raw.X .. "</X><Y>" .. raw.Y .. "</Y><Z>" .. raw.Z .. "</Z><R00>".. raw.R00 .. "</R00><R01>" .. raw.R01 .. "</R01><R02>" .. raw.R02 .. "</R02><R10>" .. raw.R10 .. "</R10><R11>" .. raw.R11 .. "</R11><R12>" .. raw.R12 .. "</R12><R20>" .. raw.R20 .. "</R20><R21>" .. raw.R21 .. "</R21><R22>" .. raw.R22 .. "</R22>"
 	end,
 	bool = function(raw)
 		return raw and "true" or "false"
@@ -1254,6 +1545,12 @@ Descriptors = {
 	NumberRange = function(raw)
 		return table.concat(raw, " ")
 	end,
+	Sequence = function(raw)
+		return table.concat(raw, " ") .. " "
+	end,
+	UDim = function(raw)
+		return "<S>" .. raw[1] .. "</S><O>" .. raw[2] .. "</O>"
+	end,
 	UDim2 = function(raw)
 		return "<XS>" .. raw.XS .. "</XS><XO>" .. raw.XO .. "</XO><YS>" .. raw.YS .. "</YS><YO>" .. raw.YO .. "</YO>"
 	end,
@@ -1266,6 +1563,9 @@ Descriptors = {
 	end,
 	Rect2D = function(raw)
 		return "<min><X>" .. raw.MinX .. "</X><Y>" .. raw.MinY .. "</Y></min><max><X>" .. raw.MaxX .. "</X><Y>" .. raw.MaxY .. "</Y></max>"
+	end,
+	SecurityCapabilities = function(raw)
+		return raw
 	end
 }
 
@@ -1274,7 +1574,9 @@ for DescriptorName, RedirectName in
 		int = "Number",
 		int64 = "Number",
 		float = "Number",
-		double = "Number"
+		double = "Number",
+		NumberSequence = "Sequence",
+		ColorSequence = "Sequence"
 	}
 do
 	Descriptors[DescriptorName] = Descriptors[RedirectName]
@@ -1300,6 +1602,7 @@ end
 	Color3uint8 = "table",
 	NumberRange = "table",
 	ProtectedString = "string",
+	UDim = "table",
 	UDim2 = "table",
 	Ray = "table",
 	Font = "table",
@@ -1323,6 +1626,26 @@ local function GetAllSuperclasses(Class)
 		layer = SuperclassList[layer]
 	end
 	return Superclasses
+end
+
+local function GetTableDescendants(Instances)
+	local result = {}
+	
+	local function recurse(Instances)
+		for _, Instance in Instances do
+			if typeof(Instance) == "Instance" then
+				Instance = tonumber(Instance.Data)
+			end
+			result[Instance] = true
+			local Children = GetChildren(Instance)
+			if Children then
+				recurse(Children)
+			end
+		end
+	end
+	
+	recurse(Instances)
+	return result
 end
 
 print("SaveInstance initialized")
@@ -1350,6 +1673,7 @@ local function saveinstance(CustomOptions)
 		FileName = memory.readu64(DataModel, Offsets.DataModel.PlaceId),
 		DebugPrints = false,
 		Decompile = true,
+		DecompileIgnore = {game.StarterPlayer.StarterPlayerScripts.PlayerModule},
 		SaveBytecode = false,
 		DecompileFunction = function(Bytecode)
 			local Body = crypt.json.encode({script = crypt.base64.encode(Bytecode)})
@@ -1371,6 +1695,7 @@ local function saveinstance(CustomOptions)
 	local FileName = Options.FileName
 	local DebugPrints = Options.DebugPrints
 	local Decompile = Options.Decompile
+	ScriptsToIgnore = GetTableDescendants(Options.DecompileIgnore)
 	local SaveBytecode = Options.SaveBytecode
 	local DecompileFunction = Options.DecompileFunction
 	local NotCreatableFixes = Options.NotCreatableFixes or {}
@@ -1390,12 +1715,19 @@ local function saveinstance(CustomOptions)
 			end
 		end
 	end
+	
 	if type(ToSave) == "number" then
 		ToSave = {ToSave}
+		if IsModel == nil and GetParent(ToSave[1]) ~= DataModel then
+			IsModel = true
+		end
 	end
 	
 	if typeof(ToSave) == "Instance" then
 		ToSave = {tonumber(ToSave.Data)}
+		if IsModel == nil and GetParent(ToSave[1]) ~= DataModel then
+			IsModel = true
+		end
 	end
 	
 	local StartingTime = os.clock()
@@ -1472,19 +1804,13 @@ local function saveinstance(CustomOptions)
 					elseif PropertyMode == 2 then -- PropertyFunction
 						raw = PropertyData[3](Instance, PropertyName, Class)
 					elseif PropertyMode == 3 then -- Decompile
-						if Decompile or SaveBytecode then
-							raw = GetScriptSource(Instance, Decompile, SaveBytecode, DecompileFunction)
-						else
-							raw = "-- Decompiling is Disabled"
-						end
+						raw = GetScriptSource(Instance, Decompile, SaveBytecode, DecompileFunction)
 					end
-					local TypeOfResult = typeof(raw)
-					if ValueType == "string" and TypeOfResult == "Instance" then -- Severe returns empty strings of certain properies (EX: Name) as strings
-						raw = ""
-					end
+
 					if raw == nil then
 						continue
 					end
+					
 					local Formatted
 					local Descriptor = Descriptors[ValueType]
 					if Descriptor then
@@ -1501,7 +1827,7 @@ local function saveinstance(CustomOptions)
 			SavedInstancesCount += 1
 			SavedInstancesUntilPrint += 1
 			if SavedInstancesUntilPrint == PrintInterval then
-				task.wait(0.7)
+				task.wait(0.7) -- Prevent script timeout
 				SerializedData ..= CurrentSerializedData
 				CurrentSerializedData = ""
 				SavedInstancesUntilPrint = 0
