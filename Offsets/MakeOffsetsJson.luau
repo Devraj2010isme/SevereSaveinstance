@@ -5,7 +5,7 @@ local PropList = { -- PropList from SevereSaveintanceXML.luau
 
 }
 
-local Theo_Offsets = JSONDecode(readfile("TheoTemp.json")).Offsets -- JSONDecode(game:HttpGet("https://raw.githubusercontent.com/Devraj2010isme/SevereSaveinstance/refs/heads/main/Offsets/TheoOffsets/" .. Version .. ".json")).Offsets
+local Theo_Offsets = JSONDecode(game:HttpGet("https://raw.githubusercontent.com/Devraj2010isme/SevereSaveinstance/refs/heads/main/Offsets/TheoOffsets/" .. Version .. ".json")).Offsets
 local Offsets = {}
 
 local function GetOffset(ClassName, PropertyName)
@@ -83,7 +83,7 @@ Offsets.ModuleScript.Bytecode = Theo_Offsets.ModuleScript.ByteCode
 
 writefile("Offsets.json", JSONEncode(Offsets))
 
---[[ Execute this prior to dumping Theo offsets:
+--[[ Execute this prior to dumping Theo offsets (my fork of Theo's offsets, https://github.com/Devraj2010isme/RbxDumperV2):
 sethiddenproperty(game.StarterGui.TextLabel, "LocalizationMatchIdentifier", "LocalizationMatchIdentifier_Value")
 sethiddenproperty(game.StarterGui.TextLabel, "LocalizationMatchedSourceText", "LocalizationMatchedSourceText_Value")
 sethiddenproperty(game.StarterGui.TextButton, "LocalizationMatchIdentifier", "LocalizationMatchIdentifier_Value")

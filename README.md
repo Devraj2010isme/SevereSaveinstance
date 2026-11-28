@@ -3,7 +3,7 @@ A saveinstance script for Severe External.
 # Loadstring
 
 ```lua
-local saveinstance = loadstring(game:HttpGet("https://raw.githubusercontent.com/Devraj2010isme/SevereSaveinstance/refs/heads/main/SevereSaveinstanceXML.luau"))
+local saveinstance = loadstring(game:HttpGet("https://raw.githubusercontent.com/Devraj2010isme/SevereSaveinstance/refs/heads/main/SevereSaveinstanceXML.luau"))()
 local options = {}
 saveinstance(options)
 ```
